@@ -1,0 +1,13 @@
+include: package:flutter_lints/flutter.yaml
+
+analyzer:
+  exclude:
+    - .toolchain/**
+    - "**/*.g.dart"
+    - build/**
+    - android/**
+    - ios/**
+
+linter:
+  rules:
+    avoid_print: true
