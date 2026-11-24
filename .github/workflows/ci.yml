@@ -37,15 +37,21 @@ jobs:
         run: flutter analyze --no-pub
       - name: Run tests
         run: flutter test --no-pub
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v4
+        with:
+          cmdline-tools-version: '15859902'
+
       - name: Install Android SDK packages
         run: |
-          if command -v android >/dev/null 2>&1; then
-            for package in platforms/android-35 platforms/android-36 platforms/android-37.0 build-tools/36.0.0 ndk/28.2.13676358 cmake/3.22.1; do
-              android --no-metrics sdk install "$package"
-            done
-          else
-            sdkmanager "platforms;android-35" "platforms;android-36" "platforms;android-37.0" "build-tools;36.0.0" "ndk;28.2.13676358" "cmake;3.22.1"
-          fi
+          sdkmanager "platforms;android-35" \
+            "platforms;android-36" \
+            "platforms;android-37.0" \
+            "build-tools;36.0.0" \
+            "ndk;28.2.13676358" \
+            "cmake;3.22.1"
+
       - name: Build debug APK
         run: flutter build apk --debug --no-pub --dart-define=NEUQ_ONE_REPOSITORY_URL=https://github.com/${{ github.repository }}
       - uses: actions/upload-artifact@v6
