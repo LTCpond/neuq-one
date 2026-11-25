@@ -1,23 +1,32 @@
 import 'dart:async';
+import 'dart:convert';
 
+import 'package:drift/native.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:neuq_one/app/app.dart';
 import 'package:neuq_one/app/router.dart';
 import 'package:neuq_one/core/auth/school_auth.dart';
 import 'package:neuq_one/core/database/school_data.dart';
 import 'package:neuq_one/core/storage/settings.dart';
+import 'package:neuq_one/core/network/public_data_client.dart';
 import 'package:neuq_one/core/time/campus_clock.dart';
 import 'package:neuq_one/core/time/neuq_periods.dart';
 import 'package:neuq_one/features/grades/data/local_grades.dart';
 import 'package:neuq_one/features/grades/domain/grades.dart';
 import 'package:neuq_one/features/profile/data/course_reminders.dart';
 import 'package:neuq_one/features/services/data/campus_card_balance.dart';
-import 'package:neuq_one/features/services/domain/classrooms.dart';
+import 'package:neuq_one/features/services/data/classroom_cache.dart';
+import 'package:neuq_one/features/services/data/public_classrooms.dart';
+import 'package:neuq_one/features/services/presentation/classrooms_page.dart';
 import 'package:neuq_one/features/timetable/data/local_timetable.dart';
 import 'package:neuq_one/features/timetable/domain/timetable.dart';
 import 'package:neuq_one/features/timetable/presentation/week_timetable.dart';
+
+import 'fixtures/classroom_week.dart';
 
 void main() {
   final sampleTerm = Semester(
@@ -50,7 +59,7 @@ void main() {
     container.read(routerProvider).go('/services/classrooms');
     await tester.pumpAndSettle();
     expect(find.text('此平台暂不支持应用内登录'), findsOneWidget);
-    expect(find.text('当日空教室'), findsNothing);
+    expect(find.byType(ClassroomsPage), findsNothing);
   });
 
   _appTest('a verified session unlocks the app and logout clears access', (
@@ -233,8 +242,7 @@ void main() {
       expect(find.text('校园卡'), findsOneWidget);
       await tester.tap(find.text('空教室'));
       await tester.pumpAndSettle();
-      expect(find.text('当日空教室'), findsOneWidget);
-      expect(find.byTooltip('打开学校空教室查询'), findsNothing);
+      expect(find.byType(ClassroomsPage), findsOneWidget);
       expect(find.byTooltip('刷新空教室'), findsOneWidget);
       expect(find.text('工学馆'), findsOneWidget);
       expect(find.text('科技楼'), findsOneWidget);
@@ -454,12 +462,12 @@ void main() {
     expect(find.text('WebVPN'), findsOneWidget);
     await tester.tap(find.text('空教室'));
     await tester.pumpAndSettle();
-    expect(find.text('当日空教室'), findsOneWidget);
+    expect(find.byType(ClassroomsPage), findsOneWidget);
   });
 
   var classroomReads = 0;
   _appTest(
-    'empty classrooms switches buildings using one school day query',
+    'public classrooms switches seven dates and three buildings using one snapshot',
     (tester) async {
       await _tab(tester, '服务');
       expect(find.text('学校官方服务'), findsNothing);
@@ -470,7 +478,7 @@ void main() {
       }
       await tester.tap(find.text('空教室'));
       await tester.pumpAndSettle();
-      expect(find.textContaining('学校教务 · 查询于'), findsOneWidget);
+      expect(find.text('数据更新于 16:19'), findsOneWidget);
       expect(find.text('第 1–2 节'), findsOneWidget);
       expect(find.text('红色 · 下节有课'), findsOneWidget);
       expect(
@@ -497,32 +505,98 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('210'), findsOneWidget);
       expect(find.text('2层'), findsNothing);
+      await tester.tap(find.text('工学馆'));
+      await tester.pumpAndSettle();
+      final selector = find.byType(DropdownButton<DateTime>);
+      expect(
+        tester.widget<DropdownButton<DateTime>>(selector).items,
+        hasLength(7),
+      );
+      await tester.tap(selector);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('12月1日 · 周二').last);
+      await tester.pumpAndSettle();
+      expect(find.text('301'), findsWidgets);
+      expect(find.text('101'), findsNothing);
       expect(classroomReads, 1);
     },
-    classrooms: (day) {
+    classroomResponse: () {
       classroomReads++;
-      return (
-        syncedAt: day,
-        buildings: {
-          for (final building in CampusBuilding.values)
-            building: ClassroomSchedule(
-              {
-                1: {
-                  switch (building) {
-                    CampusBuilding.engineering => '101',
-                    CampusBuilding.science => '6077',
-                    CampusBuilding.humanities => '210',
-                  },
-                  if (building == CampusBuilding.engineering) ...{'102', '207'},
-                },
-                if (building == CampusBuilding.engineering) 3: {'102'},
-              },
-              periodCount: 12,
-              periodsPerGroup: 2,
-            ),
-        },
-      );
+      return http.Response.bytes(utf8.encode(classroomWeekBody()), 200);
     },
+  );
+
+  var classroomTime = DateTime.utc(2026, 11, 25, 15, 59, 59);
+  var midnightReads = 0;
+  _appTest(
+    'Beijing midnight uses only matching cached dates when the public API fails',
+    (tester) async {
+      await _tab(tester, '服务');
+      await tester.tap(find.text('空教室'));
+      await tester.pumpAndSettle();
+      expect(find.text('101'), findsOneWidget);
+      expect(find.textContaining('数据已过期，仅供参考'), findsWidgets);
+
+      classroomTime = classroomTime.add(const Duration(seconds: 1));
+      await tester.pump(const Duration(seconds: 1));
+      await tester.pumpAndSettle();
+      expect(find.text('今天 · 11月26日'), findsOneWidget);
+      expect(find.text('101'), findsNothing);
+      expect(find.text('301'), findsWidgets);
+      expect(find.text('更新失败，正在显示上次数据'), findsOneWidget);
+      expect(midnightReads, 2);
+
+      await tester.tap(find.byType(DropdownButton<DateTime>));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('12月2日 · 周三').last);
+      await tester.pumpAndSettle();
+      expect(find.text('空教室数据暂不可用'), findsOneWidget);
+      expect(find.text('301'), findsNothing);
+      expect(midnightReads, 2);
+      await tester.tap(find.text('重试'));
+      await tester.pumpAndSettle();
+      expect(midnightReads, 3);
+    },
+    classroomResponse: () => ++midnightReads == 1
+        ? http.Response.bytes(utf8.encode(classroomWeekBody()), 200)
+        : http.Response('', 503),
+    classroomClock: () => classroomTime,
+  );
+
+  var expiryTime = DateTime.utc(2026, 11, 25, 9, 18, 59);
+  var expiryReads = 0;
+  _appTest(
+    'an open classroom page marks slots stale at expiry without another request',
+    (tester) async {
+      await _tab(tester, '服务');
+      await tester.tap(find.text('空教室'));
+      await tester.pumpAndSettle();
+      final room = find.text('101');
+      final color = Theme.of(tester.element(room)).colorScheme;
+      expect(tester.widget<Text>(room).style?.color, color.error);
+      expect(find.textContaining('数据已过期，仅供参考'), findsNothing);
+      expiryTime = expiryTime.add(const Duration(seconds: 1));
+      await tester.pump(const Duration(seconds: 1));
+      await tester.pumpAndSettle();
+      expect(tester.widget<Text>(room).style?.color, color.onSurface);
+      expect(find.textContaining('数据已过期，仅供参考'), findsWidgets);
+      final historicalEmpty = find.text('上次采集时未发现空教室');
+      await tester.scrollUntilVisible(
+        historicalEmpty,
+        180,
+        scrollable: find.descendant(
+          of: find.byType(ClassroomsPage),
+          matching: find.byType(Scrollable),
+        ),
+      );
+      expect(historicalEmpty, findsWidgets);
+      expect(expiryReads, 1);
+    },
+    classroomResponse: () {
+      expiryReads++;
+      return http.Response.bytes(utf8.encode(classroomWeekBody()), 200);
+    },
+    classroomClock: () => expiryTime,
   );
 
   var balanceReads = 0;
@@ -546,13 +620,20 @@ void _appTest(
   SchoolGradeBook? schoolGrades,
   Timetable? initialTimetable,
   CampusCardBalance? campusCardBalance,
-  ClassroomSchedules Function(DateTime)? classrooms,
+  http.Response Function()? classroomResponse,
+  DateTime Function()? classroomClock,
   void Function()? onCampusCardRefresh,
   void Function(SchoolDataSet)? onRefresh,
 }) {
   testWidgets(description, (tester) async {
     final timetable = _TestTimetable();
     final grades = _TestGrades();
+    final classroomCache = _WidgetClassroomCache();
+    final classroomClient = MockClient(
+      (_) async => classroomResponse?.call() ?? http.Response('', 503),
+    );
+    addTearDown(classroomCache.close);
+    addTearDown(classroomClient.close);
     if (initialTimetable != null) {
       for (final semester in initialTimetable.semesters) {
         await timetable.saveSemester(semester);
@@ -579,10 +660,13 @@ void _appTest(
               campusCardBalanceProvider.overrideWith(
                 (ref) async => campusCardBalance,
               ),
-            if (classrooms != null)
-              classroomsProvider.overrideWith(
-                (ref, day) async => classrooms(day),
-              ),
+            classroomCacheProvider.overrideWithValue(classroomCache),
+            classroomsClockProvider.overrideWithValue(
+              classroomClock ?? () => classroomNow,
+            ),
+            publicDataClientProvider.overrideWithValue(
+              PublicDataClient(classroomClient),
+            ),
             if (onCampusCardRefresh != null)
               campusCardRefreshProvider.overrideWith((ref) async {
                 onCampusCardRefresh();
@@ -604,6 +688,16 @@ void _appTest(
       unawaited(grades.changes.close());
     }
   });
+}
+
+class _WidgetClassroomCache extends ClassroomCache {
+  _WidgetClassroomCache() : super(NativeDatabase.memory());
+
+  @override
+  Future<ClassroomCacheEntry?> readWeek() async => null;
+
+  @override
+  Future<void> writeWeek(ClassroomCacheEntry entry) async {}
 }
 
 Course _sampleCourse(

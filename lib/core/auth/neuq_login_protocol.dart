@@ -40,7 +40,6 @@ SchoolNavigation schoolNavigation(Uri uri) {
           '/eams/',
           '/eams/home.action',
           '/eams/homeExt.action',
-          '/eams/classroom/apply/free.action',
         }.contains(path);
   return upgrade && uri.scheme == 'http' && uri.port == 80
       ? SchoolNavigation.upgrade

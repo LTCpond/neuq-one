@@ -17,27 +17,20 @@ enum NeuqPage {
   timetable('/eams/courseTableForStd.action', ajax: true),
   calendar('/eams/dataQuery.action', ajax: true),
   schedule('/eams/courseTableForStd!courseTable.action', ajax: true),
-  grades('/eams/teach/grade/course/person!historyCourseGrade.action'),
-  rooms('/eams/classroom/apply/free.action'),
-  roomResult('/eams/classroom/apply/free!search.action', ajax: true);
+  grades('/eams/teach/grade/course/person!historyCourseGrade.action');
 
   const NeuqPage(this.path, {this.ajax = false});
   final String path;
   final bool ajax;
 
   Uri requestUri([Map<String, String> query = const {}]) {
-    final parameters = {
-      if (ajax && this != roomResult) 'sf_request_type': 'ajax',
-      ...query,
-    };
+    final parameters = {if (ajax) 'sf_request_type': 'ajax', ...query};
     return Uri.https(
       schoolAcademicHost,
       path,
       parameters.isEmpty ? null : parameters,
     );
   }
-
-  bool get followsAcademicRedirects => this == roomResult;
 }
 
 /// Runs read-only requests within the app's first-party WebView cookie store.
@@ -89,10 +82,7 @@ class NeuqWebClient {
   }
 
   Future<void> _verifyHome() async {
-    final controller = await _openDocument(
-      schoolWebEntry,
-      restoreSession: true,
-    );
+    final controller = await _openHome();
     try {
       for (var attempt = 0; attempt < 6; attempt++) {
         if (_disposed) throw SchoolWebFailure.unavailable;
@@ -118,17 +108,14 @@ class NeuqWebClient {
     }
   }
 
-  Future<WebViewController> _openDocument(
-    Uri address, {
-    bool restoreSession = false,
-  }) async {
+  Future<WebViewController> _openHome() async {
     final home = _home = Completer<SchoolWebFailure?>();
-    _restoringAcademicSession = restoreSession;
+    _restoringAcademicSession = true;
     try {
       if (_disposed) throw SchoolWebFailure.unavailable;
       final controller = _controller ??= await _createController();
       if (_disposed) throw SchoolWebFailure.unavailable;
-      await controller.loadRequest(address);
+      await controller.loadRequest(schoolWebEntry);
       final failure = await home.future.timeout(
         _timeout,
         onTimeout: () async {
@@ -229,45 +216,6 @@ class NeuqWebClient {
     if (home != null && !home.isCompleted) home.complete(failure);
   }
 
-  Future<void> prepareClassroomQuery() async {
-    try {
-      await _openDocument(NeuqPage.rooms.requestUri());
-    } on SchoolWebFailure catch (error) {
-      if (error != SchoolWebFailure.expired) rethrow;
-      await _rejectSignIn(NeuqPage.roomResult);
-    }
-  }
-
-  Future<Map<String, String>> classroomBuildingIds(List<String> names) async {
-    final controller = _controller;
-    if (controller == null) return const {};
-    try {
-      final result = await controller.runJavaScriptReturningResult(
-        '($_classroomOptions)(${jsonEncode(names)})',
-      );
-      if (result is! String) return const {};
-      final decoded = jsonDecode(result);
-      final options = decoded is String ? jsonDecode(decoded) : decoded;
-      if (options is! Map) return const {};
-      final number = RegExp(r'^\d{1,10}$');
-      return {
-        for (final name in names)
-          if (options[name] case final String id when number.hasMatch(id))
-            name: id,
-      };
-    } catch (_) {
-      return const {};
-    }
-  }
-
-  Future<Never> _rejectSignIn(NeuqPage page) async {
-    if (page.followsAcademicRedirects) {
-      await _verifyHome();
-      throw SchoolWebFailure.denied;
-    }
-    throw SchoolWebFailure.expired;
-  }
-
   Future<String> request(
     NeuqPage page, {
     Map<String, String> query = const {},
@@ -284,19 +232,15 @@ class NeuqWebClient {
       'id': id,
       'form': form,
       'ajax': page.ajax,
-      'followAcademicRedirects': page.followsAcademicRedirects,
     });
     try {
       await controller.runJavaScript('($_readScript)($payload)');
       final result = await reply.future.timeout(_timeout);
       final status = result['status'];
       if (status == 401 || result['redirected'] == true) {
-        await _rejectSignIn(page);
+        throw SchoolWebFailure.expired;
       }
       if (status == 403) throw SchoolWebFailure.denied;
-      if (page.followsAcademicRedirects && status == null) {
-        await _verifyHome();
-      }
       final body = result['body'];
       if (status != 200 || body is! String) throw SchoolWebFailure.unavailable;
       final finalUrl = result['url'];
@@ -305,13 +249,13 @@ class NeuqWebClient {
         if (document == null || !_requiresSchoolLogin(document)) {
           throw SchoolWebFailure.unavailable;
         }
-        await _rejectSignIn(page);
+        throw SchoolWebFailure.expired;
       }
       if (RegExp(
         r'''type\s*=\s*["']?password\b''',
         caseSensitive: false,
       ).hasMatch(body)) {
-        await _rejectSignIn(page);
+        throw SchoolWebFailure.expired;
       }
       return body;
     } on SchoolWebFailure {
@@ -356,26 +300,8 @@ bool _requiresSchoolLogin(Uri document) =>
     (document.host == schoolIdentityHost ||
         document.path.toLowerCase().contains('login'));
 
-const _classroomOptions = r'''
-names => {
-  if (location.origin !== "https://jwxt.neuq.edu.cn" ||
-      !location.pathname.startsWith("/eams/classroom/apply/free")) return "{}";
-  const control = document.querySelector('select[name="classroom.building.id"]');
-  if (!control) return "{}";
-  const result = {};
-  for (const name of names) {
-    const ids = new Set([...control.options]
-      .filter(option => !option.disabled && /^\d+$/.test(option.value) &&
-        option.label.replace(/\s+/g, "").includes(name))
-      .map(option => option.value));
-    if (ids.size === 1) result[name] = [...ids][0];
-  }
-  return JSON.stringify(result);
-}
-''';
-
 const _readScript = r'''
-async ({id, url, form, ajax, followAcademicRedirects}) => {
+async ({id, url, form, ajax}) => {
   const origin = "https://jwxt.neuq.edu.cn";
   if (location.origin !== origin || new URL(url).origin !== origin) return;
   const send = value => NeuqReadReply.postMessage(JSON.stringify({id, origin, ...value}));
@@ -388,7 +314,7 @@ async ({id, url, form, ajax, followAcademicRedirects}) => {
       headers: ajax ? {"X-Requested-With": "XMLHttpRequest"} : undefined,
       credentials: "same-origin",
       mode: "same-origin",
-      redirect: followAcademicRedirects ? "follow" : "manual",
+      redirect: "manual",
       cache: "no-store",
       signal: timer.signal,
     });

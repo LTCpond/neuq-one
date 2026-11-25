@@ -3,7 +3,6 @@ import 'dart:convert';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../features/grades/domain/grades.dart';
-import '../../features/services/domain/classrooms.dart';
 import '../../features/timetable/domain/timetable.dart';
 import '../auth/neuq_login_protocol.dart';
 import '../auth/school_auth.dart';
@@ -72,36 +71,6 @@ final schoolRefreshProvider = FutureProvider.autoDispose
 final schoolDataRepositoryProvider = Provider.autoDispose(
   (ref) => SchoolDataRepository(ref.watch(databaseProvider)),
 );
-
-final classroomsProvider = FutureProvider.autoDispose
-    .family<ClassroomSchedules?, DateTime>((ref, day) async {
-      final source = ref.watch(schoolDataSourceProvider);
-      final session = ref.watch(schoolSessionProvider).asData?.value;
-      if (source == null || session == null) return null;
-      if (day != calendarDate(campusNow())) {
-        throw const FormatException('仅支持查询当日空教室');
-      }
-      final result = await source.fetchClassrooms(day);
-      if (result.buildings.values.every(
-            (schedule) => schedule.freeByPeriod.isEmpty,
-          ) ||
-          CampusBuilding.values.any((building) {
-            final schedule = result.buildings[building];
-            if (schedule == null ||
-                schedule.periodCount != neuqPeriods.length) {
-              return true;
-            }
-            final starts = schedule.groupStarts.toSet();
-            return schedule.freeByPeriod.entries.any(
-              (entry) =>
-                  !starts.contains(entry.key) ||
-                  entry.value.any((name) => name.trim().isEmpty),
-            );
-          })) {
-        throw const FormatException('教务系统返回了无效的教室列表');
-      }
-      return result;
-    }, retry: (_, _) => null);
 
 class SchoolDataRepository {
   SchoolDataRepository(this._db);

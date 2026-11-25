@@ -33,12 +33,7 @@ void main() {
     );
   });
 
-  test('school searches upgrade known pages and keep sign-in interactive', () {
-    final form = Uri.http(
-      schoolAcademicHost,
-      '/eams/classroom/apply/free.action',
-    );
-    expect(academicReadAddress(form), form.replace(scheme: 'https', port: 443));
+  test('academic reads keep sign-in interactive', () {
     expect(academicReadAddress(schoolWebEntry), schoolWebEntry);
     expect(academicReadAddress(schoolAcademicLogin), isNull);
     expect(

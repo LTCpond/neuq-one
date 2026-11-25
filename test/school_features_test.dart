@@ -7,7 +7,6 @@ import 'package:neuq_one/core/database/school_data.dart';
 import 'package:neuq_one/core/time/neuq_periods.dart';
 import 'package:neuq_one/features/grades/data/local_grades.dart';
 import 'package:neuq_one/features/grades/domain/grades.dart';
-import 'package:neuq_one/features/services/domain/classrooms.dart';
 import 'package:neuq_one/features/timetable/domain/timetable.dart';
 
 void main() {
@@ -51,21 +50,6 @@ void main() {
       closeTo(32 / 13, 0.00001),
     );
   });
-
-  test(
-    'classrooms are filtered by the range with a distinct next-period state',
-    () {
-      const clear = ClassroomDay(name: 'A101', occupiedPeriods: {});
-      const next = ClassroomDay(name: 'A102', occupiedPeriods: {3, 5});
-      expect(classroomAvailability(clear, 1, 2), ClassroomAvailability.allDay);
-      expect(
-        classroomAvailability(next, 1, 2),
-        ClassroomAvailability.nextBooked,
-      );
-      expect(classroomAvailability(next, 2, 4), isNull);
-      expect(classroomAvailability(next, 6, 7), ClassroomAvailability.partial);
-    },
-  );
 
   test('version 1 grades remain readable after the migration', () async {
     final db = AppDatabase(
@@ -167,8 +151,4 @@ class _TestSchoolSource implements SchoolDataSource {
 
   @override
   Future<Timetable> fetchTimetable() async => const Timetable([], []);
-
-  @override
-  Future<ClassroomSchedules> fetchClassrooms(DateTime day) async =>
-      (syncedAt: day, buildings: <CampusBuilding, ClassroomSchedule>{});
 }

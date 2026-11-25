@@ -2,6 +2,9 @@ const campusOffset = Duration(hours: 8);
 
 DateTime campusNow() => DateTime.now().toUtc().add(campusOffset);
 
+DateTime campusDateAt(DateTime instant) =>
+    calendarDate(instant.toUtc().add(campusOffset));
+
 DateTime calendarDate(DateTime value) =>
     DateTime.utc(value.year, value.month, value.day);
 

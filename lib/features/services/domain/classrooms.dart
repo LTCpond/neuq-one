@@ -7,36 +7,70 @@ enum CampusBuilding {
   final String label;
 }
 
-class ClassroomDay {
-  const ClassroomDay({required this.name, required this.occupiedPeriods});
-
-  final String name;
-  final Set<int> occupiedPeriods;
-}
-
 enum ClassroomAvailability { allDay, nextBooked, partial }
-
-ClassroomAvailability? classroomAvailability(
-  ClassroomDay room,
-  int start,
-  int end,
-) {
-  if (room.occupiedPeriods.isEmpty) return ClassroomAvailability.allDay;
-  if (room.occupiedPeriods.any((period) => period >= start && period <= end)) {
-    return null;
-  }
-  if (room.occupiedPeriods.contains(end + 1)) {
-    return ClassroomAvailability.nextBooked;
-  }
-  return ClassroomAvailability.partial;
-}
 
 typedef FreeClassroom = ({String name, ClassroomAvailability availability});
 
-typedef ClassroomSchedules = ({
-  DateTime syncedAt,
-  Map<CampusBuilding, ClassroomSchedule> buildings,
+const classroomPeriods = {
+  1: '1-2',
+  3: '3-4',
+  5: '5-6',
+  7: '7-8',
+  9: '9-10',
+  11: '11-12',
+};
+
+enum ClassroomSlotStatus { success, stale, unavailable }
+
+typedef ClassroomRoomDetail = ({int? capacity, String? equipment});
+
+class ClassroomSlot {
+  const ClassroomSlot({
+    required this.status,
+    this.rooms,
+    this.roomDetails,
+    this.collectedAt,
+    this.expiresAt,
+  });
+
+  final ClassroomSlotStatus status;
+  final Set<String>? rooms;
+  final Map<String, ClassroomRoomDetail>? roomDetails;
+  final DateTime? collectedAt;
+  final DateTime? expiresAt;
+
+  ClassroomSlotStatus statusAt(DateTime now) =>
+      status == ClassroomSlotStatus.success && !now.isBefore(expiresAt!)
+      ? ClassroomSlotStatus.stale
+      : status;
+
+  bool isFreshAt(DateTime now) => statusAt(now) == ClassroomSlotStatus.success;
+}
+
+typedef ClassroomDay = ({
+  DateTime? updatedAt,
+  bool complete,
+  Map<CampusBuilding, Map<int, ClassroomSlot>> buildings,
 });
+
+class ClassroomWeek {
+  const ClassroomWeek(this.generatedAt, this.days);
+
+  final DateTime generatedAt;
+  final Map<DateTime, ClassroomDay> days;
+}
+
+ClassroomSchedule classroomScheduleAt(
+  Map<int, ClassroomSlot> slots,
+  DateTime now,
+) => ClassroomSchedule(
+  {
+    for (final entry in slots.entries)
+      if (entry.value.isFreshAt(now)) entry.key: entry.value.rooms!,
+  },
+  periodCount: 12,
+  periodsPerGroup: 2,
+);
 
 class ClassroomSchedule {
   ClassroomSchedule(
@@ -87,23 +121,6 @@ class ClassroomSchedule {
   }
 }
 
-abstract interface class SchoolClassroomsDataSource {
-  Future<ClassroomSchedules> fetchClassrooms(DateTime day);
-}
-
-/// 用房间编号简写已知格式的教室名称，保留教务返回的其他名称。
-String cleanRoomName(String building, String name) {
-  switch (building) {
-    case '工学馆':
-    case '人文楼':
-      return _extractNumber(name, building);
-    case '科技楼':
-      return _cleanKeji(name) ?? name;
-    default:
-      return name;
-  }
-}
-
 int? engineeringRoomFloor(String name) => int.tryParse(
   _engineeringRoomNumber.firstMatch(name.trim())?.group(1) ?? '',
 );
@@ -111,23 +128,3 @@ int? engineeringRoomFloor(String name) => int.tryParse(
 final _engineeringRoomNumber = RegExp(
   r'^(?:工学馆\s*)?(?:[Gg]\s*)?([1-9])\d{2}(?!\d)',
 );
-final _numberPattern = RegExp(r'^\d+[A-Z]?$|^\d+[A-Z]?-[A-Z\d-]+$');
-final _zizhuPattern = RegExp(r'^自主学习室([A-Z])科技楼(.+)$');
-
-String _extractNumber(String name, String prefix) {
-  if (name.startsWith(prefix)) {
-    final rest = name.substring(prefix.length);
-    if (_numberPattern.hasMatch(rest)) return rest;
-  }
-  return name;
-}
-
-String? _cleanKeji(String name) {
-  if (name.startsWith('科技楼')) {
-    final rest = name.substring('科技楼'.length);
-    if (_numberPattern.hasMatch(rest)) return rest;
-  }
-  final match = _zizhuPattern.firstMatch(name);
-  if (match != null) return '${match.group(2)}自习室${match.group(1)}';
-  return null;
-}
