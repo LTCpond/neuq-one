@@ -158,10 +158,17 @@ class _PolicyPdfView extends StatefulWidget {
 }
 
 class _PolicyPdfViewState extends State<_PolicyPdfView> {
-  late final _document = PdfDocument.openData(widget.bytes);
+  late final _document = _openDocument();
   late var _page = _renderPage(1);
   var _pageNumber = 1;
   var _rendering = false;
+
+  Future<PdfDocument> _openDocument() async {
+    if (!await hasPdfSupport()) {
+      throw UnsupportedError('当前平台暂不支持预览 PDF');
+    }
+    return PdfDocument.openData(widget.bytes);
+  }
 
   Future<({Uint8List image, int pageCount})> _renderPage(int number) async {
     _rendering = true;
