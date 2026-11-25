@@ -14,10 +14,15 @@ typedef CampusCardBalance = ({int cents, DateTime readAt});
 enum CampusCardRefreshStatus { updated, signInRequired, unavailable }
 
 class CampusCardRepository {
-  CampusCardRepository(this._storage, this._subject);
+  CampusCardRepository(
+    this._storage,
+    this._subject, {
+    this._requestSchoolSignIn,
+  });
 
   final FlutterSecureStorage _storage;
   final String _subject;
+  final Future<Uri> Function(Uri login)? _requestSchoolSignIn;
   Future<CampusCardBalance>? _refreshing;
   bool _disposed = false;
   String get _key => 'campusCardBalance:$_subject';
@@ -63,11 +68,74 @@ class CampusCardRepository {
         _refreshing = null;
       });
 
+  Future<Uri?> schoolSignIn(Uri login) async {
+    final request = _requestSchoolSignIn;
+    if (_disposed || request == null) return null;
+    try {
+      final callback = await request(login)
+          .timeout(const Duration(seconds: 15));
+      return _disposed ? null : callback;
+    } catch (_) {
+      return null;
+    }
+  }
+
   Future<CampusCardBalance> _readOfficialPage() async {
     final controller = WebViewController();
-    final loaded = Completer<CampusCardReadFailure?>();
-    void complete(CampusCardReadFailure? failure) {
-      if (!loaded.isCompleted) loaded.complete(failure);
+    final result = Completer<CampusCardBalance?>();
+    var failure = CampusCardReadFailure.unreadable;
+    var navigation = 0;
+    var attemptedSchoolSignIn = false;
+    var waitingForSchoolSignIn = false;
+    void fail(CampusCardReadFailure error) {
+      if (result.isCompleted) return;
+      failure = error;
+      result.complete(null);
+    }
+
+    Future<void> readBalance(int currentNavigation) async {
+      for (var attempt = 0; attempt < 5; attempt++) {
+        if (_disposed ||
+            result.isCompleted ||
+            currentNavigation != navigation) {
+          return;
+        }
+        try {
+          final balance = await save(controller);
+          if (!result.isCompleted && currentNavigation == navigation) {
+            result.complete(balance);
+          }
+          return;
+        } on CampusCardReadFailure catch (error) {
+          if (currentNavigation != navigation) return;
+          if (error != CampusCardReadFailure.unreadable) {
+            fail(error);
+            return;
+          }
+        } catch (_) {
+          if (currentNavigation == navigation) {
+            fail(CampusCardReadFailure.unreadable);
+          }
+          return;
+        }
+        if (attempt < 4) {
+          await Future<void>.delayed(const Duration(milliseconds: 300));
+        }
+      }
+      if (currentNavigation == navigation) {
+        fail(CampusCardReadFailure.unreadable);
+      }
+    }
+
+    Future<void> finishSchoolSignIn(Uri login) async {
+      final callback = await schoolSignIn(login);
+      if (_disposed || result.isCompleted) return;
+      waitingForSchoolSignIn = false;
+      try {
+        await controller.loadRequest(callback ?? login);
+      } catch (_) {
+        fail(CampusCardReadFailure.unreadable);
+      }
     }
 
     await controller.setJavaScriptMode(JavaScriptMode.unrestricted);
@@ -75,43 +143,51 @@ class CampusCardRepository {
       NavigationDelegate(
         onNavigationRequest: (request) {
           final uri = Uri.tryParse(request.url);
+          if (request.isMainFrame &&
+              uri != null &&
+              !attemptedSchoolSignIn &&
+              campusCardCasService(uri) != null) {
+            navigation++;
+            attemptedSchoolSignIn = true;
+            waitingForSchoolSignIn = true;
+            unawaited(finishSchoolSignIn(uri));
+            return NavigationDecision.prevent;
+          }
           if ((uri != null && campusCardNavigationAllowed(uri)) ||
               (!request.isMainFrame && request.url == 'about:blank')) {
             return NavigationDecision.navigate;
           }
-          if (request.isMainFrame) complete(CampusCardReadFailure.unreadable);
+          if (request.isMainFrame) fail(CampusCardReadFailure.unreadable);
           return NavigationDecision.prevent;
         },
+        onPageStarted: (_) => navigation++,
         onPageFinished: (url) {
+          if (waitingForSchoolSignIn) return;
           final uri = Uri.tryParse(url);
           if (uri != null && isCampusCardPage(uri)) {
-            complete(null);
+            unawaited(readBalance(navigation));
           } else if (uri?.host == schoolIdentityHost) {
-            complete(CampusCardReadFailure.signInRequired);
+            fail(CampusCardReadFailure.signInRequired);
           }
         },
         onWebResourceError: (error) {
-          if (error.isForMainFrame != false) {
-            complete(CampusCardReadFailure.unreadable);
+          if (!waitingForSchoolSignIn && error.isForMainFrame != false) {
+            fail(CampusCardReadFailure.unreadable);
           }
         },
       ),
     );
     if (_disposed) throw CampusCardReadFailure.unreadable;
     await controller.loadRequest(campusCardEntry);
-    final failure = await loaded.future.timeout(const Duration(seconds: 10));
-    if (failure != null) throw failure;
-    for (var attempt = 0; attempt < 5 && !_disposed; attempt++) {
-      try {
-        return await save(controller);
-      } on CampusCardReadFailure catch (error) {
-        if (error != CampusCardReadFailure.unreadable) rethrow;
-        if (attempt < 4) {
-          await Future<void>.delayed(const Duration(milliseconds: 300));
-        }
-      }
-    }
-    throw CampusCardReadFailure.unreadable;
+    final balance = await result.future.timeout(
+      const Duration(seconds: 25),
+      onTimeout: () {
+        fail(CampusCardReadFailure.unreadable);
+        return null;
+      },
+    );
+    if (balance == null) throw failure;
+    return balance;
   }
 
   void dispose() => _disposed = true;
@@ -125,9 +201,11 @@ final campusCardRepositoryProvider = Provider<CampusCardRepository?>((ref) {
   if (!available || subject == null || !isStoredSchoolSubject(subject)) {
     return null;
   }
+  final client = ref.watch(neuqClientProvider);
   final repository = CampusCardRepository(
     ref.watch(schoolTicketStorageProvider),
     subject,
+    requestSchoolSignIn: (login) => client.campusCardSignIn(subject, login),
   );
   ref.onDispose(repository.dispose);
   return repository;

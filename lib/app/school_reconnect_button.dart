@@ -2,8 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:material_ui/material_ui.dart';
 
 import '../core/auth/school_auth.dart';
-import '../core/database/school_data.dart';
-import 'school_web_login_page.dart';
+import 'school_login_form.dart';
 
 class SchoolReconnectButton extends ConsumerStatefulWidget {
   const SchoolReconnectButton({super.key, required this.onConnected});
@@ -20,22 +19,43 @@ class _SchoolReconnectButtonState extends ConsumerState<SchoolReconnectButton> {
 
   Future<void> _reconnect() async {
     final subject = ref.read(schoolSessionProvider).asData?.value?.subject;
-    final web = ref.read(schoolWebClientProvider);
-    if (_open || subject == null || web == null) return;
+    final repository = ref.read(schoolAuthRepositoryProvider);
+    if (_open || subject == null || !repository.available) return;
     setState(() => _open = true);
     try {
       final navigator = Navigator.of(context, rootNavigator: true);
-      final session = await web.reconnect(
-        () => navigator.push<SchoolSession>(
-          PageRouteBuilder(
-            transitionDuration: Duration.zero,
-            reverseTransitionDuration: Duration.zero,
-            pageBuilder: (context, animation, secondary) =>
-                SchoolWebLoginPage(expectedSubject: subject),
+      final connected = await navigator.push<bool>(
+        MaterialPageRoute<bool>(
+          builder: (context) => Scaffold(
+            appBar: AppBar(title: const Text('重新连接教务')),
+            body: SafeArea(
+              child: Center(
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.all(24),
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 400),
+                    child: SchoolLoginForm(
+                      canRememberPassword: repository.canRememberPassword,
+                      onSubmit: (credentials, rememberPassword) async {
+                        await repository.signIn(
+                          credentials,
+                          rememberPassword: rememberPassword,
+                          expectedSubject: subject,
+                        );
+                        if (context.mounted) Navigator.of(context).pop(true);
+                      },
+                    ),
+                  ),
+                ),
+              ),
+            ),
           ),
         ),
       );
-      if (mounted && session?.subject == subject) widget.onConnected();
+      if (mounted && connected == true) {
+        ref.invalidate(rememberedSchoolPasswordProvider);
+        widget.onConnected();
+      }
     } finally {
       if (mounted) setState(() => _open = false);
     }

@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:neuq_one/core/network/neuq_web_client.dart';
+import 'package:neuq_one/core/network/neuq_client.dart';
 import 'package:neuq_one/core/time/neuq_periods.dart';
 import 'package:neuq_one/features/grades/data/neuq_grades.dart';
 import 'package:neuq_one/features/timetable/data/neuq_timetable.dart';

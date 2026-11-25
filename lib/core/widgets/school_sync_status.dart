@@ -1,7 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:material_ui/material_ui.dart';
 
-import '../network/neuq_web_client.dart';
+import '../network/neuq_client.dart';
 import '../time/campus_clock.dart';
 
 class SchoolSyncStatus extends StatelessWidget {
@@ -32,13 +32,16 @@ class SchoolSyncStatus extends StatelessWidget {
         : '${shortDate(time)} ${clockLabel(time.hour * 60 + time.minute)}';
     final failure = refresh.error;
     final needsLogin =
-        failure == SchoolWebFailure.expired ||
-        failure == SchoolWebFailure.differentAccount;
+        failure == SchoolRequestFailure.expired ||
+        failure == SchoolRequestFailure.differentAccount ||
+        failure == SchoolRequestFailure.invalidCredentials ||
+        failure == SchoolRequestFailure.verificationRequired ||
+        failure == SchoolRequestFailure.unsupportedLogin;
     final status = !available
         ? '$label待接入'
         : needsLogin
         ? '请重新连接教务${last == null ? '' : ' · 显示 $last 的缓存'}'
-        : failure == SchoolWebFailure.denied
+        : failure == SchoolRequestFailure.denied
         ? '教务暂未开放此查询${last == null ? '' : ' · 显示 $last 的缓存'}'
         : refresh.hasError || cacheError
         ? (last == null ? '$label失败，请重试' : '$label失败 · 显示 $last 的缓存')

@@ -2,8 +2,8 @@ import 'dart:convert';
 
 import '../../../core/auth/neuq_login_protocol.dart';
 
-const campusCardHost = 'cardmobile.neuq.edu.cn';
-final campusCardEntry = Uri.https(campusCardHost, '/home/toHomePage');
+export '../../../core/auth/neuq_login_protocol.dart'
+    show campusCardEntry, campusCardHost;
 
 bool _secureSchoolUrl(Uri uri) =>
     uri.scheme == 'https' && uri.port == 443 && uri.userInfo.isEmpty;

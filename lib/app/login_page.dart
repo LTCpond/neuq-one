@@ -3,7 +3,7 @@ import 'package:material_ui/material_ui.dart';
 
 import '../core/auth/school_auth.dart';
 import '../core/network/official_browser.dart';
-import 'school_web_login_page.dart';
+import 'school_login_form.dart';
 
 class LoginPage extends ConsumerWidget {
   const LoginPage({super.key});
@@ -11,7 +11,8 @@ class LoginPage extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final session = ref.watch(schoolSessionProvider);
-    final enabled = ref.watch(schoolAuthRepositoryProvider).available;
+    final repository = ref.watch(schoolAuthRepositoryProvider);
+    final enabled = repository.available;
     final theme = Theme.of(context);
     return Scaffold(
       body: SafeArea(
@@ -37,30 +38,16 @@ class LoginPage extends ConsumerWidget {
                   const SizedBox(height: 8),
                   const Text('请使用东北大学秦皇岛分校统一身份认证登录。'),
                   const SizedBox(height: 24),
-                  if (session.isLoading)
-                    const LinearProgressIndicator()
-                  else if (enabled)
-                    FilledButton.icon(
-                      onPressed: () => ref
+                  if (enabled)
+                    SchoolLoginForm(
+                      canRememberPassword: repository.canRememberPassword,
+                      canSubmit: !session.isLoading,
+                      onSubmit: (credentials, rememberPassword) => ref
                           .read(schoolSessionProvider.notifier)
                           .signIn(
-                            openLogin: () async {
-                              if (!context.mounted) return null;
-                              return Navigator.of(context).push<SchoolSession>(
-                                PageRouteBuilder<SchoolSession>(
-                                  transitionDuration: Duration.zero,
-                                  reverseTransitionDuration: Duration.zero,
-                                  pageBuilder: (
-                                    context,
-                                    animation,
-                                    secondaryAnimation,
-                                  ) => const SchoolWebLoginPage(),
-                                ),
-                              );
-                            },
+                            credentials,
+                            rememberPassword: rememberPassword,
                           ),
-                      icon: const Icon(Icons.open_in_browser),
-                      label: Text(session.hasError ? '重试统一身份认证' : '统一身份认证登录'),
                     )
                   else ...[
                     Text('此平台暂不支持应用内登录', style: theme.textTheme.titleMedium),
@@ -78,7 +65,7 @@ class LoginPage extends ConsumerWidget {
                   ],
                   if (session.hasError && enabled) ...[
                     const SizedBox(height: 12),
-                    const Text('登录暂未完成，请重新打开学校认证页。'),
+                    const Text('暂时无法恢复上次登录，请重新登录。'),
                   ],
                 ],
               ),

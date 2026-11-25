@@ -5,6 +5,7 @@ import 'package:material_ui/material_ui.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import 'package:webview_flutter_android/webview_flutter_android.dart';
 
+import '../../../core/auth/neuq_login_protocol.dart' show campusCardCasService;
 import '../../../core/network/official_browser.dart';
 import '../../../core/widgets/campus_components.dart';
 import '../../../core/widgets/screen.dart';
@@ -53,6 +54,8 @@ class _CampusCardWebViewState extends ConsumerState<_CampusCardWebView> {
   late final WebViewWidget _view;
   Uri? _document;
   var _navigation = 0;
+  var _entry = 0;
+  var _attemptedSchoolSignIn = false;
   var _loading = true;
   var _reading = false;
   var _openingWallet = false;
@@ -233,6 +236,16 @@ class _CampusCardWebViewState extends ConsumerState<_CampusCardWebView> {
 
   NavigationDecision _onNavigationRequest(NavigationRequest request) {
     final target = Uri.tryParse(request.url);
+    if (mounted &&
+        request.isMainFrame &&
+        target != null &&
+        !_attemptedSchoolSignIn &&
+        campusCardCasService(target) != null) {
+      _attemptedSchoolSignIn = true;
+      if (!_loading) setState(() => _loading = true);
+      unawaited(_finishSchoolSignIn(target, _entry));
+      return NavigationDecision.prevent;
+    }
     if ((target != null && campusCardNavigationAllowed(target)) ||
         (!request.isMainFrame && request.url == 'about:blank')) {
       return NavigationDecision.navigate;
@@ -291,8 +304,20 @@ class _CampusCardWebViewState extends ConsumerState<_CampusCardWebView> {
   }
 
   Future<void> _open() async {
+    _entry++;
+    _attemptedSchoolSignIn = false;
     try {
       await _controller.loadRequest(campusCardEntry);
+    } catch (_) {
+      _report('校园卡页面暂时无法打开。', loadFailed: true);
+    }
+  }
+
+  Future<void> _finishSchoolSignIn(Uri login, int entry) async {
+    final callback = await widget.repository.schoolSignIn(login);
+    if (!mounted || entry != _entry) return;
+    try {
+      await _controller.loadRequest(callback ?? login);
     } catch (_) {
       _report('校园卡页面暂时无法打开。', loadFailed: true);
     }

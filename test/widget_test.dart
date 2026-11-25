@@ -74,6 +74,12 @@ void main() {
     tester,
   ) async {
     expect(find.byType(NavigationBar), findsNothing);
+    expect(
+      tester.widget<CheckboxListTile>(find.byType(CheckboxListTile)).value,
+      isFalse,
+    );
+    await tester.enterText(find.byType(TextFormField).at(0), '00001234');
+    await tester.enterText(find.byType(TextFormField).at(1), 'test-password');
     await tester.tap(find.text('统一身份认证登录'));
     await tester.pumpAndSettle();
     expect(find.byType(NavigationBar), findsOneWidget);
@@ -1021,13 +1027,26 @@ class _TestAuth implements SchoolAuthRepository {
   @override
   bool get available => true;
   @override
+  bool get canRememberPassword => true;
+  @override
   Future<void> disconnect() async {}
   @override
-  Future<SchoolSession?> restoreSession() =>
-      restore ? signIn() : Future.value(null);
+  Future<bool> hasRememberedPassword(String subject) async => false;
   @override
-  Future<SchoolSession?> signIn({SchoolLoginPresenter? openLogin}) async =>
-      const SchoolSession(subject: 'test-owner', admissionYear: 2025);
+  Future<void> forgetPassword(String subject) async {}
+  @override
+  Future<SchoolSession?> restoreSession() async => restore ? _session : null;
+  @override
+  Future<SchoolSession> signIn(
+    NeuqCredentials credentials, {
+    required bool rememberPassword,
+    String? expectedSubject,
+  }) async => _session;
+
+  static const _session = SchoolSession(
+    subject: 'test-owner',
+    admissionYear: 2025,
+  );
 }
 
 class _TestSettings extends SettingsController {

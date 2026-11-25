@@ -7,6 +7,48 @@ import 'package:neuq_one/features/services/data/campus_card_payment.dart';
 import 'package:neuq_one/features/services/data/campus_card_protocol.dart';
 
 void main() {
+  test(
+    'a campus card ticket must return to the exact requested HTTPS service',
+    () {
+      final service = campusCardEntry.replace(
+        queryParameters: {'source': 'app'},
+      );
+      final login = Uri.https(schoolIdentityHost, '/authserver/login', {
+        'service': service.toString(),
+      });
+      expect(campusCardCasService(login), service);
+      expect(
+        campusCardCasService(
+          login.replace(
+            queryParameters: {...login.queryParameters, 'renew': 'true'},
+          ),
+        ),
+        isNull,
+      );
+      final valid = service.replace(
+        queryParameters: {'ticket': 'ST-example', 'source': 'app'},
+      );
+      expect(isCampusCardCasReturn(service, valid), isTrue);
+      for (final invalid in [
+        valid.replace(host: 'example.org'),
+        valid.replace(path: '/home/other'),
+        valid.replace(
+          queryParameters: {
+            'ticket': ['one', 'two'],
+            'source': 'app',
+          },
+        ),
+        valid.replace(
+          queryParameters: {'ticket': 'ST-example', 'source': 'altered'},
+        ),
+        valid.replace(queryParameters: {'ticket': 'ST-example'}),
+        service,
+      ]) {
+        expect(isCampusCardCasReturn(service, invalid), isFalse);
+      }
+    },
+  );
+
   test('the campus card browser accepts the verified HTTPS portal and its CAS return service', () {
     expect(campusCardNavigationAllowed(campusCardEntry), isTrue);
     expect(

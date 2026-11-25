@@ -2,18 +2,21 @@ import '../../features/grades/data/neuq_grades.dart';
 import '../../features/grades/domain/grades.dart';
 import '../../features/timetable/data/neuq_timetable.dart';
 import '../../features/timetable/domain/timetable.dart';
-import '../network/neuq_web_client.dart';
+import '../network/neuq_client.dart';
 import '../time/campus_clock.dart';
 import 'school_data_source.dart';
 
 class NeuqSchoolDataSource implements SchoolDataSource {
-  NeuqSchoolDataSource(this._web);
+  NeuqSchoolDataSource(this._client, this._subject);
 
-  final NeuqWebClient _web;
+  final NeuqClient _client;
+  final String _subject;
   (NeuqTimetableEntry, Map<String, Semester>)? _knownCalendar;
   DateTime? _calendarReadAt;
 
-  Future<(NeuqTimetableEntry, Map<String, Semester>)> _calendar() async {
+  Future<(NeuqTimetableEntry, Map<String, Semester>)> _calendar(
+    NeuqSession session,
+  ) async {
     final previous = _knownCalendar;
     final timestamp = _calendarReadAt;
     if (previous != null &&
@@ -22,10 +25,10 @@ class NeuqSchoolDataSource implements SchoolDataSource {
       return previous;
     }
     final entry = readNeuqTimetableEntry(
-      await _web.request(NeuqPage.timetable),
+      await session.request(NeuqPage.timetable),
     );
     final terms = readNeuqSemesters(
-      await _web.request(
+      await session.request(
         NeuqPage.calendar,
         form: {'tagId': entry.calendarTag, 'dataType': 'semesterCalendar'},
       ),
@@ -35,8 +38,8 @@ class NeuqSchoolDataSource implements SchoolDataSource {
   }
 
   @override
-  Future<Timetable> fetchTimetable() => _web.read(() async {
-    final (entry, terms) = await _calendar();
+  Future<Timetable> fetchTimetable() => _client.read(_subject, (session) async {
+    final (entry, terms) = await _calendar(session);
     final today = calendarDate(campusNow());
     final ordered = terms.entries.toList()
       ..sort((a, b) => b.value.start.compareTo(a.value.start));
@@ -46,7 +49,7 @@ class NeuqSchoolDataSource implements SchoolDataSource {
             .firstOrNull ??
         ordered.where((term) => !term.value.start.isAfter(today)).firstOrNull;
     if (active == null) throw const FormatException('教务学期列表缺少当前学期');
-    final response = await _web.request(
+    final response = await session.request(
       NeuqPage.schedule,
       form: {
         'ignoreHead': '1',
@@ -61,20 +64,22 @@ class NeuqSchoolDataSource implements SchoolDataSource {
   });
 
   @override
-  Future<SchoolGradeBook> fetchGrades() => _web.read(() async {
-    final response = await _web.request(
+  Future<SchoolGradeBook> fetchGrades() => _client.read(_subject, (
+    session,
+  ) async {
+    final response = await session.request(
       NeuqPage.grades,
       query: const {'projectType': 'MAJOR'},
     );
     Iterable<Semester> catalog = const [];
     try {
-      final (_, known) = await _calendar();
+      final (_, known) = await _calendar(session);
       catalog = known.values;
     } on FormatException {
       // The grade reader also accepts terms in the published NEUQ calendars.
-    } on SchoolWebFailure catch (error) {
-      if (error == SchoolWebFailure.expired ||
-          error == SchoolWebFailure.differentAccount) {
+    } on SchoolRequestFailure catch (error) {
+      if (error == SchoolRequestFailure.expired ||
+          error == SchoolRequestFailure.differentAccount) {
         rethrow;
       }
     }

@@ -1,6 +1,5 @@
-import 'dart:convert';
-
 import 'package:flutter_test/flutter_test.dart';
+import 'package:html/parser.dart' as html;
 import 'package:neuq_one/core/auth/neuq_login_protocol.dart';
 
 void main() {
@@ -102,50 +101,32 @@ void main() {
   test(
     'session requires school origin, authenticated controls and student code',
     () {
-      final data = {
-        'origin': 'https://jwxt.neuq.edu.cn',
-        'signedIn': true,
-        'studentCode': '00001234',
-      };
-      final json = jsonEncode(data);
-      final subject = schoolSubjectFromEvidence(schoolWebEntry, json);
-      expect(subject, isNotNull);
+      const account =
+          '<h1>教务管理系统</h1><a href="/eams/account.action">示例同学（00001234）</a>';
+      const logout = '<a href="/eams/logout.action">退出</a>';
+      final valid = html.parse('$account$logout');
+      final subject = schoolSubjectFromDocument(schoolWebEntry, valid);
+      expect(subject, schoolSubjectForStudentCode('00001234'));
       expect(isStoredSchoolSubject(subject!), isTrue);
-      expect(subject, isNot(contains(data['studentCode'])));
+      expect(subject, isNot(contains('00001234')));
+      expect(schoolSubjectFromDocument(schoolAcademicLogin, valid), isNull);
       expect(
-        schoolSubjectFromEvidence(schoolWebEntry, jsonEncode(json)),
-        subject,
-      );
-      expect(schoolSubjectFromEvidence(schoolAcademicLogin, json), isNull);
-      expect(
-        schoolSubjectFromEvidence(
-          Uri.https(schoolIdentityHost, '/authserver/login'),
-          json,
-        ),
+        schoolSubjectFromDocument(Uri.https('other.example'), valid),
         isNull,
       );
-      expect(
-        schoolSubjectFromEvidence(
-          schoolWebEntry,
-          jsonEncode({...data, 'origin': 'https://other.example'}),
-        ),
-        isNull,
-      );
-      expect(
-        schoolSubjectFromEvidence(
-          schoolWebEntry,
-          jsonEncode({...data, 'signedIn': false}),
-        ),
-        isNull,
-      );
-      expect(
-        schoolSubjectFromEvidence(
-          schoolWebEntry,
-          jsonEncode({...data, 'studentCode': null}),
-        ),
-        isNull,
-      );
-      expect(schoolSubjectFromEvidence(schoolWebEntry, 'invalid'), isNull);
+      for (final body in [
+        account,
+        logout,
+        '$logout<div hidden>$account</div>',
+        '$account$logout<input type="password">',
+        '$account$logout<a href="/eams/account.action">其他同学(00005678)</a>',
+      ]) {
+        expect(
+          schoolSubjectFromDocument(schoolWebEntry, html.parse(body)),
+          isNull,
+          reason: body,
+        );
+      }
     },
   );
 }

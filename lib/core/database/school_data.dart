@@ -6,7 +6,6 @@ import '../../features/grades/domain/grades.dart';
 import '../../features/timetable/domain/timetable.dart';
 import '../auth/neuq_login_protocol.dart';
 import '../auth/school_auth.dart';
-import '../network/neuq_web_client.dart';
 import '../time/campus_clock.dart';
 import '../time/neuq_periods.dart';
 import 'app_database.dart';
@@ -17,7 +16,7 @@ export 'school_data_source.dart';
 
 enum SchoolDataSet { timetable, grades }
 
-final schoolWebClientProvider = Provider<NeuqWebClient?>((ref) {
+final schoolDataSourceProvider = Provider<SchoolDataSource?>((ref) {
   final supported = ref.watch(schoolAuthRepositoryProvider).available;
   final subject = ref.watch(
     schoolSessionProvider.select((value) => value.asData?.value?.subject),
@@ -25,14 +24,7 @@ final schoolWebClientProvider = Provider<NeuqWebClient?>((ref) {
   if (!supported || subject == null || !isStoredSchoolSubject(subject)) {
     return null;
   }
-  final browser = NeuqWebClient(subject);
-  ref.onDispose(browser.dispose);
-  return browser;
-});
-
-final schoolDataSourceProvider = Provider<SchoolDataSource?>((ref) {
-  final browser = ref.watch(schoolWebClientProvider);
-  return browser == null ? null : NeuqSchoolDataSource(browser);
+  return NeuqSchoolDataSource(ref.watch(neuqClientProvider), subject);
 });
 
 bool isSchoolRecord(String id) => id.startsWith('school:');

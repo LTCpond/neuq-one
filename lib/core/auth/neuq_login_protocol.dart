@@ -1,9 +1,11 @@
-import 'dart:convert';
+import 'package:html/dom.dart';
 
 import 'package:uuid/uuid.dart';
 
 const schoolIdentityHost = 'ids.neuq.edu.cn';
 const schoolAcademicHost = 'jwxt.neuq.edu.cn';
+const campusCardHost = 'cardmobile.neuq.edu.cn';
+final campusCardEntry = Uri.https(campusCardHost, '/home/toHomePage');
 final schoolWebEntry = Uri.https(schoolAcademicHost, '/eams/homeExt.action');
 final schoolAcademicLogin = Uri.https(
   schoolAcademicHost,
@@ -13,7 +15,7 @@ final schoolAcademicLogin = Uri.https(
 enum SchoolNavigation { allow, upgrade, block }
 
 SchoolNavigation schoolNavigation(Uri uri) {
-  if (uri.userInfo.isNotEmpty) {
+  if (uri.userInfo.isNotEmpty || uri.hasFragment) {
     return SchoolNavigation.block;
   }
   final path = _path(uri);
@@ -31,8 +33,7 @@ SchoolNavigation schoolNavigation(Uri uri) {
   if (uri.scheme == 'https' && uri.port == 443) {
     return SchoolNavigation.allow;
   }
-  // These are the school's observed document redirects. Upgrade the browser
-  // navigation itself without modifying the CAS service or ticket parameters.
+  // Keep the school-issued CAS parameters when upgrading document redirects.
   final upgrade = uri.host == schoolIdentityHost
       ? path == '/authserver/login'
       : const {
@@ -54,6 +55,7 @@ bool _validService(Uri uri) {
     final target = Uri.tryParse(values.single);
     return target != null &&
         target.userInfo.isEmpty &&
+        !target.hasFragment &&
         target.host == schoolAcademicHost &&
         (target.scheme == 'https' && target.port == 443 ||
             target.scheme == 'http' && target.port == 80) &&
@@ -100,22 +102,60 @@ Uri? academicSessionAddress(Uri uri) {
       : uri;
 }
 
-/// Returns only a pseudonymous identifier for the account whose information
-/// and authenticated controls were read from the official academic document.
-String? schoolSubjectFromEvidence(Uri document, Object value) {
-  if (!isAcademicDocument(document) || value is! String) return null;
+Uri? campusCardCasService(Uri login) {
+  if (login.scheme != 'https' ||
+      login.host != schoolIdentityHost ||
+      login.port != 443 ||
+      login.userInfo.isNotEmpty ||
+      login.hasFragment ||
+      _path(login) != '/authserver/login') {
+    return null;
+  }
   try {
-    final decoded = jsonDecode(value);
-    final evidence = decoded is String ? jsonDecode(decoded) : decoded;
-    if (evidence is! Map ||
-        evidence['origin'] != 'https://$schoolAcademicHost' ||
-        evidence['signedIn'] != true ||
-        evidence['studentCode'] is! String) {
+    final parameters = login.queryParametersAll;
+    if (parameters.containsKey('renew')) return null;
+    final values = parameters['service'];
+    final service = values?.length == 1 ? Uri.tryParse(values!.single) : null;
+    if (service == null ||
+        service.originOrNull != campusCardEntry.origin ||
+        service.path != campusCardEntry.path ||
+        service.userInfo.isNotEmpty ||
+        service.hasFragment ||
+        service.queryParametersAll.containsKey('ticket')) {
       return null;
     }
-    return schoolSubjectForStudentCode(evidence['studentCode'] as String);
+    return service;
   } on FormatException {
     return null;
+  }
+}
+
+bool isCampusCardCasReturn(Uri service, Uri callback) {
+  if (callback.originOrNull != campusCardEntry.origin ||
+      callback.originOrNull != service.originOrNull ||
+      callback.path != campusCardEntry.path ||
+      callback.path != service.path ||
+      callback.userInfo.isNotEmpty ||
+      callback.hasFragment) {
+    return false;
+  }
+  try {
+    final expected = service.queryParametersAll;
+    final actual = callback.queryParametersAll;
+    final tickets = actual['ticket'];
+    if (tickets?.length != 1 ||
+        !RegExp(r'^[!-~]{1,512}$').hasMatch(tickets!.single) ||
+        actual.length != expected.length + 1) {
+      return false;
+    }
+    return expected.entries.every((entry) {
+      final values = actual[entry.key];
+      return values != null &&
+          values.length == entry.value.length &&
+          values.indexed.every((item) => item.$2 == entry.value[item.$1]);
+    });
+  } on FormatException {
+    return false;
   }
 }
 
@@ -128,93 +168,105 @@ bool isStoredSchoolSubject(String value) => RegExp(
   r'^neuq-eams:[0-9a-f]{8}-[0-9a-f]{4}-5[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$',
 ).hasMatch(value);
 
-/// Evaluated only on a first-party academic page. Read identifiers from
-/// rendered student fields and the authenticated portal's account link.
-const schoolIdentityProbe = r'''
-(() => {
-  const origin = "https://jwxt.neuq.edu.cn";
-  if (location.origin !== origin) return "{}";
+final _accountLabel = RegExp(
+  r"^\p{L}[\p{L}\p{M} ·・.'’\-]{0,39}[（(]([0-9]{7,20})[）)]$",
+  unicode: true,
+);
+final _studentField = RegExp(
+  r'^(学生学号|学号|studentid|studentnumber|名称)(?:[：:](.*))?$',
+  caseSensitive: false,
+);
 
-  const documents = [document];
-  for (let i = 0; i < documents.length && documents.length < 10; i++) {
-    for (const frame of documents[i].querySelectorAll("frame, iframe")) {
-      if (documents.length >= 10) break;
-      try {
-        const page = frame.contentDocument;
-        if (page && page.location.origin === origin && !documents.includes(page)) {
-          documents.push(page);
-        }
-      } catch (_) {}
+bool schoolElementVisible(Element element) {
+  for (Element? node = element; node != null; node = node.parent) {
+    final style = (node.attributes['style'] ?? '').toLowerCase().replaceAll(
+      RegExp(r'\s'),
+      '',
+    );
+    if (node.localName == 'template' ||
+        node.attributes.containsKey('hidden') ||
+        node.attributes['aria-hidden'] == 'true' ||
+        node.classes.any(const {'hide', 'hidden', 'd-none'}.contains) ||
+        style.contains('display:none') ||
+        style.contains('visibility:hidden')) {
+      return false;
     }
   }
+  return true;
+}
 
-  const visible = node => node.getClientRects().length > 0 &&
-    node.ownerDocument.defaultView.getComputedStyle(node).visibility === "visible";
-  const text = node => (node.textContent || "").trim().replace(/\s+/g, " ");
-  const studentLabel = /^(?:学生学号|学号|student(?:id|number))$/i;
-  const studentCode = /^[0-9]{7,20}$/;
-  const logoutLabel = /^(?:退出(?:登录|系统)?|注销|sign out|log out)$/i;
-  const portalTitle = /^(?:教务管理系统|教务系统)$/;
-  const accountLabel = /^\p{L}[\p{L}\p{M} ·・.'’\u002d]{0,39}[（(]([0-9]{7,20})[）)]$/u;
-  const fieldName = value => value.replace(/\s+/g, "");
-  const ids = new Set();
-  let signedIn = false;
-
-  for (const page of documents) {
-    if (/login|logout/i.test(page.location.pathname) ||
-        page.querySelector('input[type="password"]')) continue;
-
-    const controls = [...page.querySelectorAll("a, button")].filter(visible);
-    const hasLogout = controls.some(link => {
-      if (logoutLabel.test(text(link))) return true;
-      if (!link.href) return false;
-      try {
-        const target = new URL(link.href);
-        return target.origin === origin &&
-          /^\/eams\/logout\.action(?:;jsessionid=[\w.-]+)?$/i.test(target.pathname);
-      } catch (_) {
-        return false;
-      }
-    });
-    if (hasLogout) signedIn = true;
-
-    const labels = [...page.querySelectorAll(
-      "th, td, dt, label, span, div, p, b, strong, legend, h1, h2, h3, h4, h5, h6"
-    )].filter(visible);
-    const labelTexts = new Set(labels.map(node => fieldName(text(node))));
-    const isProfile = hasLogout && labelTexts.has("基本信息") &&
-      labelTexts.has("角色信息") && labelTexts.has("学生");
-    const isPortal = hasLogout && (portalTitle.test(fieldName(page.title)) ||
-      controls.some(node => portalTitle.test(fieldName(text(node)))) ||
-      [...labelTexts].some(value => portalTitle.test(value)));
-
-    if (isPortal) {
-      for (const link of controls) {
-        if (link.tagName !== "A") continue;
-        const account = accountLabel.exec(text(link));
-        if (account) ids.add(account[1]);
-      }
-    }
-
-    for (const label of labels) {
-      if (label.childElementCount > 2) continue;
-      const field = /^([^：:]+?)(?:[：:](.*))?$/.exec(fieldName(text(label)));
-      if (!field || !(studentLabel.test(field[1]) ||
-        (isProfile && field[1] === "名称"))) continue;
-
-      const candidate = label.nextElementSibling;
-      const value = field[2] ||
-        (candidate && visible(candidate) ? text(candidate) : "");
-      if (studentCode.test(value)) {
-        ids.add(value);
-      }
-    }
+String? schoolSubjectFromDocument(Uri address, Document page) {
+  if (!isAcademicDocument(address) ||
+      page.querySelector('input[type="password"]') != null) {
+    return null;
   }
-
-  return JSON.stringify({
-    origin,
-    signedIn,
-    studentCode: ids.size === 1 ? [...ids][0] : null
+  final controls = page
+      .querySelectorAll('a, button')
+      .where(schoolElementVisible);
+  final signedIn = controls.any((element) {
+    final href = element.attributes['href'];
+    final link = href == null
+        ? null
+        : address.resolveUri(Uri.tryParse(href) ?? Uri());
+    return (link != null &&
+            link.originOrNull == address.origin &&
+            _path(link) == '/eams/logout.action') ||
+        const {
+          '退出',
+          '退出登录',
+          '退出系统',
+          '注销',
+          'sign out',
+          'log out',
+        }.contains(element.text.trim().toLowerCase());
   });
-})()
-''';
+  if (!signedIn) return null;
+
+  final labels = page
+      .querySelectorAll(
+        'th, td, dt, label, span, div, p, h1, h2, h3, h4, h5, h6, b, strong',
+      )
+      .where(schoolElementVisible);
+  String compact(Element node) => node.text.replaceAll(RegExp(r'\s'), '');
+  final texts = labels.map(compact).toSet();
+  const titles = {'教务管理系统', '教务系统'};
+  final portal =
+      titles.any(texts.contains) ||
+      titles.contains(page.querySelector('title')?.text.trim()) ||
+      controls.any((element) => titles.contains(compact(element)));
+  final profile = const {'基本信息', '角色信息', '学生'}.every(texts.contains);
+  final subjects = <String>{};
+
+  void addCode(String? code) {
+    final subject = code == null
+        ? null
+        : schoolSubjectForStudentCode(code.trim());
+    if (subject != null) subjects.add(subject);
+  }
+
+  if (portal) {
+    for (final link in controls.where((element) => element.localName == 'a')) {
+      addCode(_accountLabel.firstMatch(link.text.trim())?.group(1));
+    }
+  }
+  for (final label in labels) {
+    if (label.children.length > 2) continue;
+    final field = _studentField.firstMatch(compact(label));
+    if (field == null || field.group(1) == '名称' && !profile) continue;
+    final sibling = label.nextElementSibling;
+    final value = field.group(2);
+    addCode(
+      value != null && value.isNotEmpty
+          ? value
+          : sibling != null && schoolElementVisible(sibling)
+          ? sibling.text
+          : null,
+    );
+  }
+  return subjects.length == 1 ? subjects.single : null;
+}
+
+extension on Uri {
+  String? get originOrNull =>
+      hasAuthority && (scheme == 'https' || scheme == 'http') ? origin : null;
+}

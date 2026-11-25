@@ -85,6 +85,28 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
               children: [
                 const Text('偏好设置', style: _sectionStyle),
                 const SizedBox(height: 6),
+                if (ref.watch(rememberedSchoolPasswordProvider).value == true)
+                  ListTile(
+                    leading: const Icon(Icons.lock_reset),
+                    title: const Text('删除已记住的学校密码'),
+                    onTap: _busy
+                        ? null
+                        : () => _run(() async {
+                            final subject = ref
+                                .read(schoolSessionProvider)
+                                .asData
+                                ?.value
+                                ?.subject;
+                            if (subject == null) return null;
+                            await ref
+                                .read(schoolAuthRepositoryProvider)
+                                .forgetPassword(subject);
+                            if (mounted) {
+                              ref.invalidate(rememberedSchoolPasswordProvider);
+                            }
+                            return '已删除本机保存的学校密码';
+                          }),
+                  ),
                 DataPanel(
                   value: settings,
                   retry: () => ref.invalidate(settingsProvider),

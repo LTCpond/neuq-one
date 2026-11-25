@@ -410,8 +410,8 @@ ProviderContainer _scope(
       schoolDataSourceProvider.overrideWith(
         (_) => throw StateError('unexpected school lookup'),
       ),
-      schoolWebClientProvider.overrideWith(
-        (_) => throw StateError('unexpected school browser'),
+      neuqClientProvider.overrideWith(
+        (_) => throw StateError('unexpected school client'),
       ),
     ],
   );
