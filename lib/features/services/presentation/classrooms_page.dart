@@ -208,8 +208,6 @@ class _ClassroomsPageState extends ConsumerState<ClassroomsPage> {
     final schedule = classroomScheduleAt(slots, now);
     final groupByFloor = view.building == CampusBuilding.engineering;
     return [
-      _AllDayCard(schedule: schedule),
-      const SizedBox(height: 17),
       Row(
         children: [
           Expanded(child: CampusSectionHeading(view.table ? '教室空闲表' : '分时段查询')),
@@ -348,90 +346,6 @@ class _BuildingPicker extends StatelessWidget {
   }
 }
 
-class _AllDayCard extends StatelessWidget {
-  const _AllDayCard({required this.schedule});
-
-  final ClassroomSchedule schedule;
-
-  @override
-  Widget build(BuildContext context) {
-    final rooms = schedule.allDay.toList()..sort();
-    return Card(
-      color: campusBlue,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(15, 12, 15, 18),
-        child: DefaultTextStyle.merge(
-          style: const TextStyle(
-            color: Colors.white,
-            fontWeight: FontWeight.w700,
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  const Expanded(
-                    child: Text('全天空闲', style: TextStyle(fontSize: 19)),
-                  ),
-                  const SizedBox(width: 8),
-                  Flexible(
-                    child: Text(
-                      schedule.complete
-                          ? '${rooms.length.toString().padLeft(2, '0')} 间'
-                          : '— 间',
-                      textAlign: TextAlign.end,
-                      style: const TextStyle(fontSize: 34, height: 1.16),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 15),
-              if (rooms.isEmpty)
-                Text(
-                  schedule.complete ? '所选日期暂无全天空闲教室' : '部分时段缺少有效数据，暂无法确认全天空闲',
-                  style: const TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w400,
-                  ),
-                )
-              else
-                Wrap(
-                  spacing: 6,
-                  runSpacing: 6,
-                  children: [
-                    for (final room in rooms)
-                      DecoratedBox(
-                        decoration: BoxDecoration(
-                          color: const Color(0xFF4F79ED),
-                          borderRadius: BorderRadius.circular(9),
-                        ),
-                        child: ConstrainedBox(
-                          constraints: const BoxConstraints(minWidth: 76),
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 10,
-                              vertical: 8,
-                            ),
-                            child: Text(
-                              room,
-                              textAlign: TextAlign.center,
-                              style: const TextStyle(fontSize: 16),
-                            ),
-                          ),
-                        ),
-                      ),
-                  ],
-                ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
 class _ScheduleViewToggle extends StatelessWidget {
   const _ScheduleViewToggle({required this.showTable, required this.onChanged});
 
@@ -485,7 +399,7 @@ class _ScheduleViewToggle extends StatelessWidget {
 const _roomStatuses = {
   ClassroomAvailability.allDay: '全天空闲',
   ClassroomAvailability.partial: '本时段空闲',
-  ClassroomAvailability.nextBooked: '下节有课',
+  ClassroomAvailability.nextBooked: '下一时段占用',
 };
 
 (Color, Color) _roomColors(ColorScheme colors, ClassroomAvailability status) {
@@ -763,6 +677,19 @@ class _ClassroomTable extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
+        DefaultTextStyle.merge(
+          style: TextStyle(fontSize: 11, color: colors.onSurfaceVariant),
+          child: Wrap(
+            spacing: 13,
+            runSpacing: 6,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              _MatrixLegendItem(color: freeColor, label: '空闲'),
+              const Text('空白 · 非空闲'),
+            ],
+          ),
+        ),
+        const SizedBox(height: 14),
         LayoutBuilder(
           builder: (context, constraints) => SingleChildScrollView(
             scrollDirection: Axis.horizontal,
@@ -855,20 +782,6 @@ class _ClassroomTable extends StatelessWidget {
             ),
           ),
         ),
-        const SizedBox(height: 9),
-        DefaultTextStyle.merge(
-          style: TextStyle(fontSize: 11, color: colors.onSurfaceVariant),
-          child: Wrap(
-            spacing: 13,
-            runSpacing: 6,
-            crossAxisAlignment: WrapCrossAlignment.center,
-            children: [
-              _MatrixLegendItem(color: freeColor, label: '空闲'),
-              const Text('空白 · 未列为空闲'),
-              _MatrixLegendItem(color: unknownColor, label: '? · 暂无有效数据'),
-            ],
-          ),
-        ),
       ],
     );
   }
@@ -918,7 +831,7 @@ class _AvailabilityCell extends StatelessWidget {
   Widget build(BuildContext context) {
     final status = switch (available) {
       true => '空闲',
-      false => '未列为空闲',
+      false => '非空闲',
       null => '暂无有效数据',
     };
     return Semantics(

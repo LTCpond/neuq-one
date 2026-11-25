@@ -374,6 +374,7 @@ void main() {
       addTearDown(tester.view.resetDevicePixelRatio);
       await _tab(tester, '课表');
       final doubleBlock = find.byKey(const ValueKey('timetable-course-double'));
+      expect(tester.getSize(doubleBlock).height, closeTo(120.8, .01));
       Finder inBlock(String label) =>
           find.descendant(of: doubleBlock, matching: find.text(label));
       final title = inBlock('连上两节');
@@ -563,7 +564,8 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('数据更新于 16:19'), findsOneWidget);
       expect(find.text('1–2 节'), findsOneWidget);
-      expect(find.text('下节有课'), findsOneWidget);
+      expect(find.text('全天空闲'), findsOneWidget);
+      expect(find.text('下一时段占用'), findsOneWidget);
       final booked = find.text('101');
       final ordinary = find.text('102').first;
       final upperFloor = find.text('207');
@@ -619,7 +621,7 @@ void main() {
 
   var classroomTime = DateTime.utc(2026, 11, 25, 15, 59, 59);
   _appTest(
-    'classroom table distinguishes free, unlisted, and expired slots',
+    'classroom table distinguishes free, occupied, and expired slots',
     (tester) async {
       await _tab(tester, '服务');
       await tester.tap(find.text('空教室'));
@@ -629,11 +631,17 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('教室空闲表'), findsOneWidget);
+      final blankLegend = find.text('空白 · 非空闲');
+      expect(
+        tester.getBottomLeft(blankLegend).dy,
+        lessThan(tester.getTopLeft(find.byType(Table).first).dy),
+      );
+      expect(find.textContaining('暂无有效数据'), findsNothing);
       final semantics = tester.ensureSemantics();
       try {
         await tester.pump();
         final free = find.bySemanticsLabel('101，第 1 节开始，空闲');
-        final unlisted = find.bySemanticsLabel('101，第 3 节开始，未列为空闲');
+        final occupied = find.bySemanticsLabel('101，第 3 节开始，非空闲');
         final expired = find.bySemanticsLabel('101，第 5 节开始，暂无有效数据');
         Finder fill(Finder cell, Color color) => find.descendant(
           of: cell,
@@ -645,8 +653,8 @@ void main() {
           ),
         );
         expect(fill(free, const Color(0xFF2459E0)), findsOneWidget);
-        expect(unlisted, findsOneWidget);
-        expect(fill(unlisted, const Color(0xFF2459E0)), findsNothing);
+        expect(occupied, findsOneWidget);
+        expect(fill(occupied, const Color(0xFF2459E0)), findsNothing);
         expect(fill(expired, const Color(0xFFDCE1E9)), findsOneWidget);
       } finally {
         semantics.dispose();

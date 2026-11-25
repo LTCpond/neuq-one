@@ -142,7 +142,11 @@ class WeekTimetable extends StatelessWidget {
               child: LayoutBuilder(
                 builder: (context, constraints) {
                   final rail = constraints.maxWidth < 340 ? 33.0 : 38.0;
-                  const rowHeight = 52.0;
+                  final rowHeight =
+                      ((MediaQuery.sizeOf(context).height - 220) / 10).clamp(
+                        52.0,
+                        72.0,
+                      );
                   return Padding(
                     padding: const EdgeInsets.only(right: 4),
                     child: Row(
