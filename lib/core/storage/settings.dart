@@ -7,15 +7,11 @@ final preferencesProvider = Provider((ref) => SharedPreferencesAsync());
 class AppSettings {
   const AppSettings({
     this.theme = ThemeMode.system,
-    this.quickLinks = const [],
-    this.quickLinksCustomized = false,
     this.reminderMinutes = 0,
     this.admissionYear = 2025,
   });
 
   final ThemeMode theme;
-  final List<String> quickLinks;
-  final bool quickLinksCustomized;
   final int reminderMinutes;
   final int admissionYear;
 }
@@ -25,22 +21,17 @@ final settingsProvider = AsyncNotifierProvider<SettingsController, AppSettings>(
 );
 
 class SettingsController extends AsyncNotifier<AppSettings> {
-  static const _homeShortcutsKey = 'dashboardServiceShortcuts';
   SharedPreferencesAsync get _prefs => ref.read(preferencesProvider);
 
   @override
   Future<AppSettings> build() async {
     final prefs = ref.watch(preferencesProvider);
     final theme = await prefs.getString('theme');
-    final shortcuts = await prefs.getStringList(_homeShortcutsKey);
     return AppSettings(
       theme: ThemeMode.values.firstWhere(
         (item) => item.name == theme,
         orElse: () => ThemeMode.system,
       ),
-      quickLinks:
-          shortcuts ?? await prefs.getStringList('quickLinks') ?? const [],
-      quickLinksCustomized: shortcuts != null,
       reminderMinutes: await prefs.getInt('reminderMinutes') ?? 0,
       admissionYear: await prefs.getInt('admissionYear') ?? 2025,
     );
@@ -48,8 +39,6 @@ class SettingsController extends AsyncNotifier<AppSettings> {
 
   Future<void> setTheme(ThemeMode value) =>
       _update(() => _prefs.setString('theme', value.name));
-  Future<void> setQuickLinks(List<String> value) =>
-      _update(() => _prefs.setStringList(_homeShortcutsKey, value));
   Future<void> setReminder(int value) =>
       _update(() => _prefs.setInt('reminderMinutes', value));
   Future<void> _update(Future<void> Function() write) async {

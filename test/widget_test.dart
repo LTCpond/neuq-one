@@ -3,7 +3,9 @@ import 'dart:convert';
 
 import 'package:drift/native.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:go_router/go_router.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:material_ui/material_ui.dart';
@@ -17,13 +19,19 @@ import 'package:neuq_one/core/time/campus_clock.dart';
 import 'package:neuq_one/core/time/neuq_periods.dart';
 import 'package:neuq_one/features/grades/data/local_grades.dart';
 import 'package:neuq_one/features/grades/domain/grades.dart';
+import 'package:neuq_one/features/mail/data/campus_mail.dart';
+import 'package:neuq_one/features/mail/presentation/campus_mail_page.dart';
 import 'package:neuq_one/features/profile/data/course_reminders.dart';
 import 'package:neuq_one/features/services/data/campus_card_balance.dart';
 import 'package:neuq_one/features/services/data/classroom_cache.dart';
+import 'package:neuq_one/features/services/data/employment_feed.dart';
 import 'package:neuq_one/features/services/data/public_classrooms.dart';
 import 'package:neuq_one/features/services/presentation/classrooms_page.dart';
+import 'package:neuq_one/features/services/presentation/employment_page.dart';
 import 'package:neuq_one/features/timetable/data/local_timetable.dart';
 import 'package:neuq_one/features/timetable/domain/timetable.dart';
+import 'package:neuq_one/features/timetable/presentation/timetable_date.dart';
+import 'package:neuq_one/features/timetable/presentation/timetable_page.dart';
 import 'package:neuq_one/features/timetable/presentation/week_timetable.dart';
 
 import 'fixtures/classroom_week.dart';
@@ -69,6 +77,11 @@ void main() {
     await tester.tap(find.text('统一身份认证登录'));
     await tester.pumpAndSettle();
     expect(find.byType(NavigationBar), findsOneWidget);
+    expect(
+      _router(tester).routeInformationProvider.value.uri.path,
+      '/timetable',
+    );
+    expect(find.byType(TimetablePage), findsOneWidget);
     await _tab(tester, '我的');
     await tester.ensureVisible(find.byTooltip('退出统一身份认证'));
     await tester.tap(find.byTooltip('退出统一身份认证'));
@@ -77,15 +90,34 @@ void main() {
     expect(find.text('统一身份认证登录'), findsOneWidget);
   }, auth: const _TestAuth(restore: false));
 
-  _appTest('home and grades omit the removed features', (tester) async {
-    expect(find.text('下一节课'), findsNothing);
-    expect(find.text('今日课程'), findsOneWidget);
-    expect(find.text('最近考试'), findsNothing);
-    await _tab(tester, '成绩');
-    expect(find.text('考试安排'), findsNothing);
-    expect(find.byTooltip('GPA 计算器'), findsNothing);
-    expect(find.byTooltip('查看演示成绩'), findsNothing);
-  });
+  _appTest(
+    'a restored session opens the timetable and redirects the old root',
+    (tester) async {
+      final router = _router(tester);
+      expect(router.routeInformationProvider.value.uri.path, '/timetable');
+      expect(find.byType(TimetablePage), findsOneWidget);
+      final destinations = tester.widgetList<NavigationDestination>(
+        find.byType(NavigationDestination),
+      );
+      expect(destinations.map((destination) => destination.label), [
+        '课表',
+        '成绩',
+        '服务',
+        '我的',
+      ]);
+      expect(find.text('下一节课'), findsNothing);
+      expect(find.text('今日课程'), findsNothing);
+      expect(find.text('最近考试'), findsNothing);
+      await _tab(tester, '成绩');
+      expect(find.text('考试安排'), findsNothing);
+      expect(find.byTooltip('GPA 计算器'), findsNothing);
+      expect(find.byTooltip('查看演示成绩'), findsNothing);
+      router.go('/');
+      await tester.pumpAndSettle();
+      expect(router.routeInformationProvider.value.uri.path, '/timetable');
+      expect(find.byType(TimetablePage), findsOneWidget);
+    },
+  );
 
   _appTest(
     'school grades display the GPA returned by the school',
@@ -175,9 +207,10 @@ void main() {
   _appTest(
     'navigation keeps timetable state and refreshes on every tab tap',
     (tester) async {
-      expect(find.text('NEUQ One'), findsOneWidget);
-
-      await _tab(tester, '课表');
+      expect(
+        tester.widget<WeekTimetable>(find.byType(WeekTimetable)).week,
+        sampleTerm.weekFor(campusNow()),
+      );
       expect(find.text('课程表'), findsNothing);
       expect(find.byTooltip('同步教务课表'), findsNothing);
       expect(find.byTooltip('新增课程'), findsNothing);
@@ -280,21 +313,12 @@ void main() {
   );
 
   _appTest(
-    'the home card displays the saved balance and opens the school card route',
+    'services display the saved campus card balance and open the card route',
     (tester) async {
-      final tile = find.byKey(const ValueKey('home-shortcut-campus-card'));
-      await tester.ensureVisible(tile);
-      await tester.pumpAndSettle();
+      await _tab(tester, '服务');
+      final tile = find.widgetWithText(ListTile, '校园卡');
       expect(
         find.descendant(of: tile, matching: find.text('¥12.34')),
-        findsOneWidget,
-      );
-      expect(
-        find.descendant(of: tile, matching: find.textContaining('上次读取')),
-        findsNothing,
-      );
-      expect(
-        find.descendant(of: tile, matching: find.text('校园卡余额')),
         findsOneWidget,
       );
       await tester.tap(tile);
@@ -412,57 +436,26 @@ void main() {
     expect(find.widgetWithText(ListTile, '线性代数'), findsOneWidget);
   });
 
-  _appTest('quick links can be reordered and saved', (tester) async {
-    final reorder = find.text('调整快捷入口');
-    await tester.ensureVisible(reorder);
-    await tester.pumpAndSettle();
-    await tester.tap(reorder);
-    await tester.pumpAndSettle();
-    final academic = find.byKey(const ValueKey('academic'));
-    final handle = find.descendant(
-      of: academic,
-      matching: find.byType(ReorderableDragStartListener),
-    );
-    final gesture = await tester.startGesture(tester.getCenter(handle));
-    await gesture.moveBy(const Offset(0, 25));
-    await tester.pump(const Duration(milliseconds: 150));
-    await gesture.moveBy(const Offset(0, 60));
-    await tester.pumpAndSettle();
-    await gesture.up();
-    await tester.pumpAndSettle();
-    await tester.tap(find.widgetWithText(FilledButton, '保存'));
-    await tester.pumpAndSettle();
-    expect(
-      tester.getTopLeft(find.text('一网通办')).dx,
-      lessThan(tester.getTopLeft(find.text('教务系统')).dx),
-    );
-  });
-
-  _appTest('home shortcut selection supports the complete service catalog', (
+  _appTest('the services menu opens mail and employment within its branch', (
     tester,
   ) async {
-    await tester.tap(find.text('调整快捷入口'));
+    await _tab(tester, '服务');
+    final router = _router(tester);
+    final mail = find.widgetWithText(ListTile, '校园邮箱');
+    await tester.scrollUntilVisible(mail, 250);
+    await tester.tap(mail);
     await tester.pumpAndSettle();
-    final dialog = find.byType(AlertDialog);
-    for (final id in ['campus-card', 'classrooms', 'vpn']) {
-      final row = find.descendant(
-        of: dialog,
-        matching: find.byKey(ValueKey(id)),
-      );
-      await tester.ensureVisible(row);
-      await tester.pumpAndSettle();
-      await tester.tap(
-        find.descendant(of: row, matching: find.byType(Checkbox)),
-      );
-      await tester.pumpAndSettle();
-    }
-    await tester.tap(find.widgetWithText(FilledButton, '保存'));
+    expect(find.byType(CampusMailPage), findsOneWidget);
+    await _tab(tester, '课表');
+    await _tab(tester, '服务');
+    expect(find.byType(CampusMailPage), findsOneWidget);
+    router.pop();
     await tester.pumpAndSettle();
-    expect(find.text('校园卡余额'), findsNothing);
-    expect(find.text('WebVPN'), findsOneWidget);
-    await tester.tap(find.text('空教室'));
+    final employment = find.widgetWithText(ListTile, '宣讲会与招聘会');
+    await tester.scrollUntilVisible(employment, 250);
+    await tester.tap(employment);
     await tester.pumpAndSettle();
-    expect(find.byType(ClassroomsPage), findsOneWidget);
+    expect(find.byType(EmploymentPage), findsOneWidget);
   });
 
   var classroomReads = 0;
@@ -599,17 +592,87 @@ void main() {
     classroomClock: () => expiryTime,
   );
 
-  var balanceReads = 0;
+  final cardRepository = _TestCampusCardRepository();
   _appTest(
-    'home entry and selecting the home tab automatically refresh the campus balance',
+    'campus card refresh runs only when the services menu becomes visible',
     (tester) async {
-      expect(balanceReads, 1);
+      expect(cardRepository.refreshes, 0);
       await _tab(tester, '服务');
-      expect(balanceReads, 1);
-      await _tab(tester, '首页');
-      expect(balanceReads, 2);
+      expect(cardRepository.refreshes, 1);
+      expect(find.text('¥0.00'), findsNothing);
+      await _tab(tester, '服务');
+      expect(cardRepository.refreshes, 1);
+      await _tab(tester, '课表');
+      _resume(tester);
+      await tester.pumpAndSettle();
+      expect(cardRepository.refreshes, 1);
+
+      cardRepository.nextBalance = (cents: 5678, readAt: DateTime.utc(2026));
+      _router(tester).go('/services/classrooms');
+      await tester.pumpAndSettle();
+      expect(cardRepository.refreshes, 1);
+      _router(tester).pop();
+      await tester.pumpAndSettle();
+      expect(cardRepository.refreshes, 2);
+      expect(find.text('¥56.78'), findsOneWidget);
+
+      cardRepository.nextBalance = null;
+      await _tab(tester, '课表');
+      await _tab(tester, '服务');
+      expect(cardRepository.refreshes, 3);
+      expect(find.text('¥56.78'), findsOneWidget);
     },
-    onCampusCardRefresh: () => balanceReads++,
+    campusCardRepository: cardRepository,
+  );
+
+  final sunday = DateTime.utc(2026, 11, 29, 23, 59, 58);
+  final datedTimetable = Timetable([
+    Semester(id: 'dated', name: '跨日测试学期', start: mondayOf(sunday), weeks: 18),
+  ], []);
+  var now = sunday;
+  var reminderSyncs = 0;
+  var timetableRefreshes = 0;
+  _appTest(
+    'midnight updates the week and resume syncs while another tab is open',
+    (tester) async {
+      final window = find.byType(WeekTimetable);
+      WeekTimetable visibleWeek() => tester.widget<WeekTimetable>(window);
+      expect(visibleWeek().week, 1);
+      expect(visibleWeek().today, calendarDate(sunday));
+      now = DateTime.utc(2026, 11, 30);
+      await tester.pump(const Duration(seconds: 2));
+      await tester.pumpAndSettle();
+      expect(visibleWeek().week, 2);
+      expect(visibleWeek().today, now);
+
+      await _tab(tester, '服务');
+      final priorReminderSyncs = reminderSyncs;
+      final priorRefreshes = timetableRefreshes;
+      now = DateTime.utc(2026, 12, 7);
+      _resume(tester);
+      await tester.pumpAndSettle();
+      expect(reminderSyncs, priorReminderSyncs + 1);
+      expect(timetableRefreshes, priorRefreshes + 1);
+      await _tab(tester, '课表');
+      expect(visibleWeek().week, 3);
+      expect(visibleWeek().today, now);
+
+      final container = ProviderScope.containerOf(tester.element(window));
+      await container.read(schoolSessionProvider.notifier).disconnect();
+      await tester.pumpAndSettle();
+      final afterLogoutSyncs = reminderSyncs;
+      final afterLogoutRefreshes = timetableRefreshes;
+      _resume(tester);
+      await tester.pumpAndSettle();
+      expect(reminderSyncs, afterLogoutSyncs);
+      expect(timetableRefreshes, afterLogoutRefreshes);
+    },
+    timetableClock: () => now,
+    initialTimetable: datedTimetable,
+    onReminderSync: () => reminderSyncs++,
+    onRefresh: (section) {
+      if (section == SchoolDataSet.timetable) timetableRefreshes++;
+    },
   );
 }
 
@@ -620,9 +683,11 @@ void _appTest(
   SchoolGradeBook? schoolGrades,
   Timetable? initialTimetable,
   CampusCardBalance? campusCardBalance,
+  CampusCardRepository? campusCardRepository,
   http.Response Function()? classroomResponse,
   DateTime Function()? classroomClock,
-  void Function()? onCampusCardRefresh,
+  DateTime Function()? timetableClock,
+  void Function()? onReminderSync,
   void Function(SchoolDataSet)? onRefresh,
 }) {
   testWidgets(description, (tester) async {
@@ -667,15 +732,23 @@ void _appTest(
             publicDataClientProvider.overrideWithValue(
               PublicDataClient(classroomClient),
             ),
-            if (onCampusCardRefresh != null)
-              campusCardRefreshProvider.overrideWith((ref) async {
-                onCampusCardRefresh();
-                return CampusCardRefreshStatus.updated;
-              }),
+            if (campusCardRepository != null)
+              campusCardRepositoryProvider.overrideWithValue(
+                campusCardRepository,
+              ),
+            if (timetableClock != null)
+              timetableClockProvider.overrideWithValue(timetableClock),
+            campusMailProvider.overrideWithValue(null),
+            employmentCacheProvider.overrideWith((ref) async => null),
+            employmentRefreshProvider.overrideWith(
+              (ref, force) async => throw const FormatException(),
+            ),
             timetableRepositoryProvider.overrideWithValue(timetable),
             gradesRepositoryProvider.overrideWithValue(grades),
             settingsProvider.overrideWith(_TestSettings.new),
-            reminderSyncProvider.overrideWith((ref) async {}),
+            reminderSyncProvider.overrideWith(
+              (ref) async => onReminderSync?.call(),
+            ),
           ],
           child: const NeuqOneApp(),
         ),
@@ -688,6 +761,26 @@ void _appTest(
       unawaited(grades.changes.close());
     }
   });
+}
+
+class _TestCampusCardRepository extends CampusCardRepository {
+  _TestCampusCardRepository() : super(const FlutterSecureStorage(), 'test');
+
+  int refreshes = 0;
+  CampusCardBalance? nextBalance;
+  CampusCardBalance? _cached;
+
+  @override
+  Future<CampusCardBalance?> load() async => _cached;
+
+  @override
+  Future<CampusCardBalance> refresh() async {
+    refreshes++;
+    final balance = nextBalance;
+    if (balance == null) throw StateError('Balance unavailable');
+    _cached = balance;
+    return balance;
+  }
 }
 
 class _WidgetClassroomCache extends ClassroomCache {
@@ -726,6 +819,23 @@ Future<void> _tab(WidgetTester tester, String title) async {
     find.descendant(of: find.byType(NavigationBar), matching: find.text(title)),
   );
   await tester.pumpAndSettle();
+}
+
+GoRouter _router(WidgetTester tester) =>
+    ProviderScope.containerOf(tester.element(find.byType(NavigationBar)))
+        .read(routerProvider);
+
+void _resume(WidgetTester tester) {
+  for (final state in [
+    AppLifecycleState.inactive,
+    AppLifecycleState.hidden,
+    AppLifecycleState.paused,
+    AppLifecycleState.hidden,
+    AppLifecycleState.inactive,
+    AppLifecycleState.resumed,
+  ]) {
+    tester.binding.handleAppLifecycleStateChanged(state);
+  }
 }
 
 Future<void> _createSemester(WidgetTester tester) async {
@@ -768,11 +878,6 @@ class _TestSettings extends SettingsController {
   @override
   Future<void> setTheme(ThemeMode value) async =>
       state = AsyncData(AppSettings(theme: value));
-
-  @override
-  Future<void> setQuickLinks(List<String> value) async => state = AsyncData(
-    AppSettings(quickLinks: value, quickLinksCustomized: true),
-  );
 }
 
 class _TestTimetable implements TimetableRepository {

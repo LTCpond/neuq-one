@@ -1,15 +1,22 @@
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:material_ui/material_ui.dart';
 
 import '../../../core/widgets/screen.dart';
+import '../data/campus_card_balance.dart';
 import '../domain/services.dart';
 import 'campus_card_tile.dart';
 import 'open_campus_service.dart';
 
-class ServicesPage extends StatelessWidget {
+class ServicesPage extends ConsumerWidget {
   const ServicesPage({super.key});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    // The indexed stack keeps this page mounted while other tabs are visible.
+    if (TickerMode.valuesOf(context).enabled &&
+        ModalRoute.isCurrentOf(context) == true) {
+      ref.watch(campusCardRefreshProvider);
+    }
     final colors = Theme.of(context).colorScheme;
     return CampusScreen(
       title: '校园服务',

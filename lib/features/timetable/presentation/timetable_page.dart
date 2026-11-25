@@ -12,6 +12,7 @@ import '../data/local_timetable.dart';
 import '../domain/icalendar.dart';
 import '../domain/timetable.dart';
 import 'semester_menu.dart';
+import 'timetable_date.dart';
 import 'timetable_editors.dart';
 import 'week_timetable.dart';
 
@@ -47,7 +48,7 @@ class _TimetablePageState extends ConsumerState<TimetablePage> {
     final data = ref.watch(visibleTimetableProvider);
     final repository = ref.watch(timetableRepositoryProvider);
     final terms = data.value?.semesters ?? [];
-    final today = calendarDate(campusNow());
+    final today = ref.watch(timetableDateProvider);
     final semester =
         terms.where((term) => term.id == _semesterId).firstOrNull ??
         currentSemester(terms, today);
@@ -86,7 +87,7 @@ class _TimetablePageState extends ConsumerState<TimetablePage> {
                 switch (value) {
                   case 'today':
                     setState(() {
-                      _semesterId = currentSemester(terms, today)?.id;
+                      _semesterId = null;
                       _week = null;
                     });
                   case 'edit':
