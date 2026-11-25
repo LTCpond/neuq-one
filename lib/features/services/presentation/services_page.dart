@@ -39,7 +39,12 @@ class ServicesPage extends StatelessWidget {
                       child: Icon(entry.icon, size: 21),
                     ),
                     title: Text(entry.name),
-                    trailing: const Icon(Icons.open_in_new, size: 18),
+                    trailing: Icon(
+                      entry.route == null
+                          ? Icons.open_in_new
+                          : Icons.chevron_right,
+                      size: 18,
+                    ),
                     onTap: () => openCampusService(context, entry),
                   ),
                 ),

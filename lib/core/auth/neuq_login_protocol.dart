@@ -89,6 +89,18 @@ Uri? academicReadAddress(Uri uri) {
   return null;
 }
 
+bool isAcademicCasLogin(Uri uri) =>
+    uri.host == schoolIdentityHost &&
+    _path(uri) == '/authserver/login' &&
+    schoolNavigation(uri) != SchoolNavigation.block;
+
+Uri? academicSessionAddress(Uri uri) {
+  if (!isAcademicCasLogin(uri)) return academicReadAddress(uri);
+  return schoolNavigation(uri) == SchoolNavigation.upgrade
+      ? uri.replace(scheme: 'https', port: 443)
+      : uri;
+}
+
 /// Returns only a pseudonymous identifier for the account whose information
 /// and authenticated controls were read from the official academic document.
 String? schoolSubjectFromEvidence(Uri document, Object value) {

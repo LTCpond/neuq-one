@@ -51,16 +51,30 @@ const campusServiceGroups = {
       'https://eone.neuq.edu.cn/',
     ),
     CampusService.website(
+      'campus-network',
+      '校园网',
+      Icons.wifi_rounded,
+      'https://ipgate.neuq.edu.cn/',
+    ),
+    CampusService.inApp(
       'mail',
       '校园邮箱',
       Icons.mail_outline_rounded,
-      'https://mail.neuq.edu.cn/',
+      '/services/mail',
     ),
     CampusService.website(
       'vpn',
       'WebVPN',
       Icons.vpn_lock_outlined,
       'https://vpn.neuq.edu.cn/',
+    ),
+  ],
+  '就业': [
+    CampusService.inApp(
+      'employment',
+      '宣讲会与招聘会',
+      Icons.work_outline_rounded,
+      '/services/employment',
     ),
   ],
 };

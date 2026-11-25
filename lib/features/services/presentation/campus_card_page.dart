@@ -76,7 +76,7 @@ class _CampusCardWebViewState extends ConsumerState<_CampusCardWebView> {
     unawaited(_start());
   }
 
-  bool _canRequestCamera(int navigation) =>
+  bool _isCurrentCardPage(int navigation) =>
       mounted &&
       navigation == _navigation &&
       ModalRoute.of(context)?.isCurrent == true &&
@@ -86,7 +86,7 @@ class _CampusCardWebViewState extends ConsumerState<_CampusCardWebView> {
   Future<void> _requestCamera(WebViewPermissionRequest request) async {
     final navigation = _navigation;
     if (_requestingCamera ||
-        !_canRequestCamera(navigation) ||
+        !_isCurrentCardPage(navigation) ||
         request.types.length != 1 ||
         !request.types.contains(WebViewPermissionResourceType.camera)) {
       await request.deny();
@@ -102,22 +102,88 @@ class _CampusCardWebViewState extends ConsumerState<_CampusCardWebView> {
                 ? platform.webViewIdentifier
                 : null,
           );
-      if (!_canRequestCamera(navigation)) {
+      if (!_isCurrentCardPage(navigation)) {
         await request.deny();
       } else if (allowed) {
         await request.grant();
       } else {
         await request.deny();
-        _report('扫一扫需要相机权限，请在系统设置中允许相机权限后重试。');
+        _report('请在系统设置中允许校园卡使用相机。');
       }
     } catch (_) {
       await request.deny();
-      if (_canRequestCamera(navigation)) {
+      if (_isCurrentCardPage(navigation)) {
         _report('相机暂时无法打开，请检查权限后重试。');
       }
     } finally {
       _requestingCamera = false;
     }
+  }
+
+  Future<List<String>> _choosePhoto(
+    AndroidWebViewController platform,
+    FileSelectorParams params,
+  ) async {
+    final navigation = _navigation;
+    if (!_isCurrentCardPage(navigation) ||
+        params.mode == FileSelectorMode.save) {
+      return const [];
+    }
+    final types = params.acceptTypes
+        .expand((entry) => entry.toLowerCase().split(','))
+        .map((entry) => entry.trim())
+        .where((entry) => entry.isNotEmpty);
+    if (types.isNotEmpty &&
+        !types.any(
+          (type) =>
+              type.startsWith('image/') ||
+              const {
+                '*/*',
+                '.jpg',
+                '.jpeg',
+                '.png',
+                '.webp',
+                '.heic',
+              }.contains(type),
+        )) {
+      return const [];
+    }
+    try {
+      final uri = await ref
+          .read(campusCardCameraProvider)
+          .pickPhoto(platform.webViewIdentifier);
+      if (_isCurrentCardPage(navigation) && uri != null) return [uri];
+    } catch (_) {
+      if (_isCurrentCardPage(navigation)) _report('无法打开系统照片选择器，请重试。');
+    }
+    return const [];
+  }
+
+  Future<void> _showWeChatScan() async {
+    final open = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('校园卡扫一扫'),
+        content: const Text('请在微信搜索「东秦校园卡」小程序，打开后使用小程序内的「扫一扫」。'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('打开微信'),
+          ),
+        ],
+      ),
+    );
+    if (open != true || !mounted) return;
+    try {
+      if (await openCampusCardWeChat()) return;
+    } catch (_) {
+      // The WeChat app may be unavailable on this device.
+    }
+    _report('无法打开微信，请确认已安装后重试。');
   }
 
   Future<void> _start() async {
@@ -153,6 +219,9 @@ class _CampusCardWebViewState extends ConsumerState<_CampusCardWebView> {
         ),
       );
       if (_controller.platform case final AndroidWebViewController platform) {
+        await platform.setOnShowFileSelector(
+          (params) => _choosePhoto(platform, params),
+        );
         await enableAndroidCashierFrames(platform.webViewIdentifier);
       }
       if (mounted) await _open();
@@ -281,6 +350,11 @@ class _CampusCardWebViewState extends ConsumerState<_CampusCardWebView> {
       appBar: AppBar(
         title: const Text('校园卡'),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.qr_code_scanner),
+            tooltip: '在微信使用校园卡扫一扫',
+            onPressed: _showWeChatScan,
+          ),
           IconButton(
             icon: const Icon(Icons.refresh),
             tooltip: '重新打开校园卡',

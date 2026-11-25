@@ -5,11 +5,12 @@ import 'package:go_router/go_router.dart';
 import '../core/auth/school_auth.dart';
 import '../core/database/school_data.dart';
 import '../features/dashboard/presentation/dashboard_page.dart';
-import '../features/dashboard/presentation/exams_page.dart';
 import '../features/grades/presentation/grades_page.dart';
+import '../features/mail/presentation/campus_mail_page.dart';
 import '../features/profile/presentation/profile_page.dart';
 import '../features/services/data/campus_card_balance.dart';
 import '../features/services/presentation/campus_card_page.dart';
+import '../features/services/presentation/employment_page.dart';
 import '../features/services/presentation/services_page.dart';
 import '../features/services/presentation/classrooms_page.dart';
 import '../features/timetable/presentation/timetable_page.dart';
@@ -79,12 +80,6 @@ final routerProvider = Provider<GoRouter>((ref) {
                   path: tab.path,
                   builder: (context, state) => pages[index],
                   routes: [
-                    if (index == 0) ...[
-                      GoRoute(
-                        path: 'exams',
-                        builder: (context, state) => const ExamsPage(),
-                      ),
-                    ],
                     if (tab.path == '/services')
                       GoRoute(
                         path: 'classrooms',
@@ -94,6 +89,16 @@ final routerProvider = Provider<GoRouter>((ref) {
                       GoRoute(
                         path: 'campus-card',
                         builder: (context, state) => const CampusCardPage(),
+                      ),
+                    if (tab.path == '/services')
+                      GoRoute(
+                        path: 'employment',
+                        builder: (context, state) => const EmploymentPage(),
+                      ),
+                    if (tab.path == '/services')
+                      GoRoute(
+                        path: 'mail',
+                        builder: (context, state) => const CampusMailPage(),
                       ),
                   ],
                 ),

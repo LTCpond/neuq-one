@@ -30,9 +30,3 @@ int? periodAtEnd(int minute) {
   final index = neuqPeriods.indexWhere((period) => period.end == minute);
   return index < 0 ? null : index + 1;
 }
-
-int nextTeachingPeriod(DateTime campusTime) {
-  final minute = campusTime.hour * 60 + campusTime.minute;
-  final index = neuqPeriods.indexWhere((period) => period.end > minute);
-  return index < 0 ? neuqPeriods.length : index + 1;
-}

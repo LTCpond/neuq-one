@@ -69,16 +69,6 @@ class _GradesPageState extends ConsumerState<GradesPage> {
                   ref.invalidate(refreshKey);
                 },
         ),
-        IconButton(
-          tooltip: 'GPA 计算器',
-          icon: const Icon(Icons.calculate_outlined),
-          onPressed: () => _calculator(context, scale, admissionYear != null),
-        ),
-        IconButton(
-          tooltip: '查看演示成绩',
-          icon: const Icon(Icons.science_outlined),
-          onPressed: () => _demo(context, scale),
-        ),
         if (term != null)
           SemesterMenu(
             semesters: semesters,
@@ -176,136 +166,6 @@ class _GradesPageState extends ConsumerState<GradesPage> {
       ),
     );
   }
-
-  Future<void> _calculator(
-    BuildContext context,
-    GpaScale scale,
-    bool admissionVerified,
-  ) async {
-    final settings = ref.read(settingsProvider.notifier);
-    var selected = scale;
-    var input = '';
-    bool changeStrategy = false;
-    await showDialog<void>(
-      context: context,
-      builder: (context) => StatefulBuilder(
-        builder: (context, update) {
-          GradeSummary? calculation;
-          String? error;
-          try {
-            calculation = _calculateFromText(input, selected);
-          } on FormatException catch (failure) {
-            error = failure.message;
-          }
-          return RecordEditor(
-            title: 'GPA 计算器',
-            onSave: () async {
-              if (changeStrategy) {
-                await settings.setAdmissionYear(
-                  selected == GpaScale.current ? 2025 : 2024,
-                );
-              }
-            },
-            children: [
-              DropdownButtonFormField<GpaScale>(
-                initialValue: selected,
-                decoration: const InputDecoration(labelText: '适用年级'),
-                items: [
-                  for (final option in GpaScale.values)
-                    DropdownMenuItem(value: option, child: Text(option.label)),
-                ],
-                onChanged: (value) => update(() => selected = value!),
-              ),
-              Text('百分制从 60 分计 1.0、100 分计 5.0，低于 60 分计 0。同一课程的多次考核可逐条输入。'),
-              TextFormField(
-                decoration: const InputDecoration(
-                  labelText: '试算（选填）',
-                  hintText: '每行输入 分数 学分，例如 88 3',
-                ),
-                minLines: 2,
-                maxLines: 5,
-                onChanged: (value) => update(() => input = value),
-              ),
-              if (error != null)
-                Text(
-                  error,
-                  style: TextStyle(color: Theme.of(context).colorScheme.error),
-                ),
-              if (calculation?.gpa case final gpa?)
-                Text('试算 GPA  ${gpa.toStringAsFixed(4)}'),
-              if (!admissionVerified)
-                CheckboxListTile(
-                  contentPadding: EdgeInsets.zero,
-                  value: changeStrategy,
-                  title: const Text('按此年级计算我的成绩'),
-                  onChanged: (value) =>
-                      update(() => changeStrategy = value ?? false),
-                ),
-            ],
-          );
-        },
-      ),
-    );
-  }
-
-  Future<void> _demo(BuildContext context, GpaScale scale) async {
-    final grades = await MockGradesRepository('demo').watch().first;
-    if (!context.mounted) return;
-    await showModalBottomSheet<void>(
-      context: context,
-      showDragHandle: true,
-      isScrollControlled: true,
-      useSafeArea: true,
-      builder: (context) => SingleChildScrollView(
-        padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
-        child: Column(
-          children: [
-            const SectionTitle('演示成绩'),
-            const Text('以下为虚构示例，仅在此处查看。'),
-            const SizedBox(height: 12),
-            _SummaryCard(summary: GradeSummary(grades, scale), scale: scale),
-            for (final grade in grades)
-              Padding(
-                padding: const EdgeInsets.only(top: 8),
-                child: _GradeTile(grade: grade),
-              ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-GradeSummary? _calculateFromText(String input, GpaScale scale) {
-  if (input.trim().isEmpty) return null;
-  final grades = <Grade>[];
-  for (final line in input.trim().split('\n')) {
-    if (line.trim().isEmpty) continue;
-    final fields = line.trim().split(RegExp(r'[\s,，]+'));
-    final score = double.tryParse(fields.first);
-    final credit = fields.length == 2 ? double.tryParse(fields.last) : null;
-    if (score == null ||
-        !score.isFinite ||
-        score < 0 ||
-        score > 100 ||
-        credit == null ||
-        !credit.isFinite ||
-        credit <= 0 ||
-        credit > 50) {
-      throw const FormatException('每行填写 0–100 分的成绩和大于 0 的学分');
-    }
-    grades.add(
-      Grade(
-        id: '',
-        semesterId: '',
-        name: '',
-        credit: credit,
-        score: score,
-        kind: GradeKind.required,
-      ),
-    );
-  }
-  return GradeSummary(grades, scale);
 }
 
 class _SummaryCard extends StatelessWidget {
@@ -392,7 +252,7 @@ class _GradeTile extends StatelessWidget {
   Widget build(BuildContext context) => Card(
     child: ListTile(
       title: Text(grade.name),
-      subtitle: Text('${_number(grade.credit)} 学分${grade.demo ? ' · 演示' : ''}'),
+      subtitle: Text('${_number(grade.credit)} 学分'),
       trailing: Text(
         grade.scoreLabel,
         style: Theme.of(context).textTheme.titleLarge,

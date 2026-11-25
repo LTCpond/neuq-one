@@ -10,7 +10,6 @@ import 'package:neuq_one/core/database/school_data.dart';
 import 'package:neuq_one/core/storage/settings.dart';
 import 'package:neuq_one/core/time/campus_clock.dart';
 import 'package:neuq_one/core/time/neuq_periods.dart';
-import 'package:neuq_one/features/dashboard/data/local_exams.dart';
 import 'package:neuq_one/features/grades/data/local_grades.dart';
 import 'package:neuq_one/features/grades/domain/grades.dart';
 import 'package:neuq_one/features/profile/data/course_reminders.dart';
@@ -68,6 +67,16 @@ void main() {
     expect(find.byType(NavigationBar), findsNothing);
     expect(find.text('统一身份认证登录'), findsOneWidget);
   }, auth: const _TestAuth(restore: false));
+
+  _appTest('home and grades omit the removed features', (tester) async {
+    expect(find.text('下一节课'), findsNothing);
+    expect(find.text('今日课程'), findsOneWidget);
+    expect(find.text('最近考试'), findsNothing);
+    await _tab(tester, '成绩');
+    expect(find.text('考试安排'), findsNothing);
+    expect(find.byTooltip('GPA 计算器'), findsNothing);
+    expect(find.byTooltip('查看演示成绩'), findsNothing);
+  });
 
   _appTest(
     'school grades display the GPA returned by the school',
@@ -219,7 +228,7 @@ void main() {
       );
       await _tab(tester, '服务');
       expect(find.text('校园服务'), findsOneWidget);
-      expect(find.text('校园网'), findsNothing);
+      expect(find.text('校园网'), findsOneWidget);
       expect(find.text('图书馆'), findsNothing);
       expect(find.text('校园卡'), findsOneWidget);
       await tester.tap(find.text('空教室'));
@@ -378,9 +387,7 @@ void main() {
     ),
   );
 
-  _appTest('manual grade contributes to GPA and examples remain separate', (
-    tester,
-  ) async {
+  _appTest('manual grade contributes to GPA', (tester) async {
     await _tab(tester, '成绩');
     await _createSemester(tester);
     await tester.tap(find.text('录入成绩'));
@@ -395,11 +402,6 @@ void main() {
 
     expect(find.text('3.8000'), findsOneWidget);
     expect(find.widgetWithText(ListTile, '线性代数'), findsOneWidget);
-
-    await tester.tap(find.byTooltip('查看演示成绩'));
-    await tester.pumpAndSettle();
-    expect(find.text('演示成绩'), findsOneWidget);
-    expect(find.widgetWithText(ListTile, '大学英语'), findsOneWidget);
   });
 
   _appTest('quick links can be reordered and saved', (tester) async {
@@ -431,8 +433,6 @@ void main() {
   _appTest('home shortcut selection supports the complete service catalog', (
     tester,
   ) async {
-    expect(find.text('下一节课'), findsNothing);
-    expect(find.text('今日课程'), findsOneWidget);
     await tester.tap(find.text('调整快捷入口'));
     await tester.pumpAndSettle();
     final dialog = find.byType(AlertDialog);
@@ -590,7 +590,6 @@ void _appTest(
               }),
             timetableRepositoryProvider.overrideWithValue(timetable),
             gradesRepositoryProvider.overrideWithValue(grades),
-            examsProvider.overrideWith((ref) => Stream.value([])),
             settingsProvider.overrideWith(_TestSettings.new),
             reminderSyncProvider.overrideWith((ref) async {}),
           ],

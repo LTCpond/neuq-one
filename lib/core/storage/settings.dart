@@ -52,9 +52,6 @@ class SettingsController extends AsyncNotifier<AppSettings> {
       _update(() => _prefs.setStringList(_homeShortcutsKey, value));
   Future<void> setReminder(int value) =>
       _update(() => _prefs.setInt('reminderMinutes', value));
-  Future<void> setAdmissionYear(int value) =>
-      _update(() => _prefs.setInt('admissionYear', value));
-
   Future<void> _update(Future<void> Function() write) async {
     await write();
     ref.invalidateSelf();

@@ -91,3 +91,16 @@ Future<bool> launchCampusCardWallet(CampusCardWalletLink link) async {
 
 Future<void> enableAndroidCashierFrames(int webViewIdentifier) =>
     _channel.invokeMethod<void>('watchCashierFrames', webViewIdentifier);
+
+Future<bool> openCampusCardWeChat() async {
+  if (defaultTargetPlatform == TargetPlatform.android) {
+    return await _channel.invokeMethod<bool>('openWeChat') ?? false;
+  }
+  if (defaultTargetPlatform == TargetPlatform.iOS) {
+    return launchUrl(
+      Uri.parse('weixin://'),
+      mode: LaunchMode.externalApplication,
+    );
+  }
+  return false;
+}

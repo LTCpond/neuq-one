@@ -54,6 +54,7 @@ class NeuqWebClient {
   Future<void> _tail = Future.value();
   bool _disposed = false;
   bool _reconnecting = false;
+  bool _restoringAcademicSession = false;
   int _generation = 0;
 
   Future<T?> reconnect<T>(Future<T?> Function() open) async {
@@ -88,7 +89,10 @@ class NeuqWebClient {
   }
 
   Future<void> _verifyHome() async {
-    final controller = await _openDocument(schoolWebEntry);
+    final controller = await _openDocument(
+      schoolWebEntry,
+      restoreSession: true,
+    );
     try {
       for (var attempt = 0; attempt < 6; attempt++) {
         if (_disposed) throw SchoolWebFailure.unavailable;
@@ -114,14 +118,26 @@ class NeuqWebClient {
     }
   }
 
-  Future<WebViewController> _openDocument(Uri address) async {
+  Future<WebViewController> _openDocument(
+    Uri address, {
+    bool restoreSession = false,
+  }) async {
     final home = _home = Completer<SchoolWebFailure?>();
+    _restoringAcademicSession = restoreSession;
     try {
       if (_disposed) throw SchoolWebFailure.unavailable;
       final controller = _controller ??= await _createController();
       if (_disposed) throw SchoolWebFailure.unavailable;
       await controller.loadRequest(address);
-      final failure = await home.future.timeout(_timeout);
+      final failure = await home.future.timeout(
+        _timeout,
+        onTimeout: () async {
+          final document = Uri.tryParse(await controller.currentUrl() ?? '');
+          return document != null && _requiresSchoolLogin(document)
+              ? SchoolWebFailure.expired
+              : SchoolWebFailure.unavailable;
+        },
+      );
       if (failure != null) throw failure;
       return controller;
     } on SchoolWebFailure {
@@ -129,6 +145,7 @@ class NeuqWebClient {
     } catch (_) {
       throw SchoolWebFailure.unavailable;
     } finally {
+      _restoringAcademicSession = false;
       _home = null;
     }
   }
@@ -144,7 +161,11 @@ class NeuqWebClient {
       NavigationDelegate(
         onNavigationRequest: (request) {
           final url = Uri.tryParse(request.url);
-          final address = url == null ? null : academicReadAddress(url);
+          final address = url == null
+              ? null
+              : _restoringAcademicSession && request.isMainFrame
+              ? academicSessionAddress(url)
+              : academicReadAddress(url);
           if (address != null && address == url) {
             return NavigationDecision.navigate;
           }
@@ -172,6 +193,10 @@ class NeuqWebClient {
           final document = Uri.tryParse(url);
           if (document != null && isAcademicDocument(document)) {
             _finishDocument(null);
+          } else if (document != null &&
+              _restoringAcademicSession &&
+              isAcademicCasLogin(document)) {
+            unawaited(_checkCasPrompt(controller));
           }
         },
         onWebResourceError: (error) {
@@ -182,6 +207,21 @@ class NeuqWebClient {
       ),
     );
     return controller;
+  }
+
+  Future<void> _checkCasPrompt(WebViewController controller) async {
+    final home = _home;
+    try {
+      final prompt = await controller.runJavaScriptReturningResult(
+        'location.origin === "https://$schoolIdentityHost" && '
+        '!!document.querySelector(\'input[type="password"]\')',
+      );
+      if (home == _home && (prompt == true || prompt.toString() == 'true')) {
+        _finishDocument(SchoolWebFailure.expired);
+      }
+    } catch (_) {
+      // CAS may already be navigating back to the academic site.
+    }
   }
 
   void _finishDocument(SchoolWebFailure? failure) {

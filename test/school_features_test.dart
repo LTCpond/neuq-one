@@ -24,7 +24,6 @@ void main() {
       ),
       isTrue,
     );
-    expect(nextTeachingPeriod(DateTime.utc(2026, 11, 24, 9, 45)), 3);
   });
 
   test('both NEUQ GPA policies account for attempt entries and exclusions', () {

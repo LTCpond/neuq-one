@@ -32,4 +32,7 @@ class CampusCardCamera {
       return false;
     }
   }
+
+  Future<String?> pickPhoto(int androidWebViewIdentifier) =>
+      _channel.invokeMethod<String>('pickPhoto', androidWebViewIdentifier);
 }

@@ -27,7 +27,9 @@
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>NSCameraUsageDescription</key>
-	<string>校园卡扫一扫需要使用相机识别二维码。</string>
+	<string>校园卡扫一扫和人脸采集可使用相机。</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>校园卡人脸采集可从照片图库选择要上传的照片。</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

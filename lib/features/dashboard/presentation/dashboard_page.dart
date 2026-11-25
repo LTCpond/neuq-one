@@ -15,7 +15,6 @@ import '../../profile/data/course_reminders.dart';
 import '../../timetable/data/local_timetable.dart';
 import '../../timetable/domain/timetable.dart';
 import '../../timetable/presentation/timetable_page.dart';
-import '../data/local_exams.dart';
 
 class DashboardPage extends ConsumerStatefulWidget {
   const DashboardPage({super.key});
@@ -56,7 +55,6 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
     try {
       await Future.wait([
         ref.refresh(timetableProvider.future),
-        ref.refresh(examsProvider.future),
         ref.refresh(settingsProvider.future),
         if (refreshCampusCard) ref.refresh(campusCardRefreshProvider.future),
       ]);
@@ -68,7 +66,6 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
   @override
   Widget build(BuildContext context) {
     final timetable = ref.watch(visibleTimetableProvider);
-    final exams = ref.watch(examsProvider);
     final settings = ref.watch(settingsProvider);
     final preferences = settings.value;
     final shortcuts = preferences == null
@@ -88,9 +85,6 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
     );
     final week = semester?.weekFor(_now);
     final teachingWeek = week == null ? '非教学周' : '第 $week 教学周';
-    final nextExam = exams.value
-        ?.where((exam) => !exam.campusTime.isBefore(_now))
-        .firstOrNull;
     final theme = Theme.of(context);
     return CampusScreen(
       title: 'NEUQ One',
@@ -177,30 +171,6 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
                 onPressed: () => ref.invalidate(settingsProvider),
                 child: const Text('重新读取快捷入口'),
               ),
-            SectionTitle(
-              '最近考试',
-              action: TextButton(
-                onPressed: () => context.push('/exams'),
-                child: const Text('管理'),
-              ),
-            ),
-            DataPanel(
-              value: exams,
-              retry: () => ref.invalidate(examsProvider),
-              builder: (_) => Card(
-                child: ListTile(
-                  leading: const Icon(Icons.assignment_outlined),
-                  title: Text(nextExam?.name ?? '暂无待考安排'),
-                  subtitle: Text(
-                    nextExam == null
-                        ? '可手动记录考试日期和地点'
-                        : '${shortDate(nextExam.campusTime)} ${clockLabel(nextExam.campusTime.hour * 60 + nextExam.campusTime.minute)}${nextExam.room.isEmpty ? '' : ' · ${nextExam.room}'}',
-                  ),
-                  trailing: const Icon(Icons.chevron_right),
-                  onTap: () => context.push('/exams'),
-                ),
-              ),
-            ),
           ],
         ),
       ),

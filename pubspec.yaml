@@ -1,7 +1,7 @@
 name: neuq_one
 description: 东北大学秦皇岛分校学生的非官方校园工作台
 publish_to: none
-version: 0.1.13+14
+version: 0.1.14+15
 
 environment:
   sdk: ^3.14.0
@@ -28,6 +28,7 @@ dependencies:
   uuid: ^4.6.0
   flutter_local_notifications: ^23.0.4
   timezone: ^0.11.2
+  enough_mail: 3.0.0
 
 dev_dependencies:
   flutter_test:

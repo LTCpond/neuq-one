@@ -1,6 +1,7 @@
 package org.neuqone.neuq_one
 
 import android.Manifest
+import android.app.Activity
 import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -15,6 +16,7 @@ import java.net.URISyntaxException
 
 class MainActivity : FlutterActivity() {
     private var cameraPermissionResult: MethodChannel.Result? = null
+    private var photoPickerResult: MethodChannel.Result? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -22,27 +24,35 @@ class MainActivity : FlutterActivity() {
             flutterEngine.dartExecutor.binaryMessenger,
             "org.neuqone.neuq_one/campus_card_camera"
         ).setMethodCallHandler { call, result ->
-            if (call.method == "requestCameraPermission") {
-                val identifier = (call.arguments as? Number)?.toLong()
-                val webView = identifier?.let {
-                    WebViewFlutterAndroidExternalApi.getWebView(flutterEngine, it)
+            val identifier = (call.arguments as? Number)?.toLong()
+            val webView = identifier?.let {
+                WebViewFlutterAndroidExternalApi.getWebView(flutterEngine, it)
+            }
+            val page = webView?.url?.let(Uri::parse)
+            val activeCardPage = page?.scheme == "https" &&
+                page.host == "cardmobile.neuq.edu.cn" && page.userInfo == null &&
+                (page.port == -1 || page.port == 443) && webView?.hasWindowFocus() == true
+            when (call.method) {
+                "requestCameraPermission" -> {
+                    if (!activeCardPage || cameraPermissionResult != null) {
+                        result.success(false)
+                    } else if (checkSelfPermission(Manifest.permission.CAMERA) ==
+                        PackageManager.PERMISSION_GRANTED
+                    ) {
+                        result.success(true)
+                    } else {
+                        cameraPermissionResult = result
+                        requestPermissions(arrayOf(Manifest.permission.CAMERA), CAMERA_PERMISSION_REQUEST)
+                    }
                 }
-                val page = webView?.url?.let(Uri::parse)
-                if (page?.scheme != "https" || page.host != "cardmobile.neuq.edu.cn" ||
-                    page.userInfo != null || (page.port != -1 && page.port != 443) ||
-                    webView?.hasWindowFocus() != true || cameraPermissionResult != null
-                ) {
-                    result.success(false)
-                } else if (checkSelfPermission(Manifest.permission.CAMERA) ==
-                    PackageManager.PERMISSION_GRANTED
-                ) {
-                    result.success(true)
-                } else {
-                    cameraPermissionResult = result
-                    requestPermissions(arrayOf(Manifest.permission.CAMERA), CAMERA_PERMISSION_REQUEST)
+                "pickPhoto" -> {
+                    if (activeCardPage && photoPickerResult == null) {
+                        pickPhoto(result)
+                    } else {
+                        result.success(null)
+                    }
                 }
-            } else {
-                result.notImplemented()
+                else -> result.notImplemented()
             }
         }
         MethodChannel(
@@ -61,8 +71,52 @@ class MainActivity : FlutterActivity() {
                     }
                     result.success(null)
                 }
+                "openWeChat" -> result.success(openWeChat())
                 else -> result.notImplemented()
             }
+        }
+    }
+
+    @Suppress("DEPRECATION")
+    private fun pickPhoto(result: MethodChannel.Result) {
+        val picker = Intent(Intent.ACTION_OPEN_DOCUMENT)
+            .setType("image/*")
+            .addCategory(Intent.CATEGORY_OPENABLE)
+            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        photoPickerResult = result
+        try {
+            startActivityForResult(picker, PHOTO_PICKER_REQUEST)
+        } catch (_: ActivityNotFoundException) {
+            photoPickerResult = null
+            result.error("photo_picker_unavailable", null, null)
+        }
+    }
+
+    @Deprecated("Uses the system activity result to return a photo URI to WebView.")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode != PHOTO_PICKER_REQUEST) return
+        val result = photoPickerResult
+        photoPickerResult = null
+        val uri = if (resultCode == Activity.RESULT_OK) data?.data else null
+        val photo = try {
+            uri?.takeIf { it.scheme == "content" &&
+                contentResolver.getType(it)?.startsWith("image/") == true }
+        } catch (_: SecurityException) {
+            null
+        }
+        result?.success(photo?.toString())
+    }
+
+    private fun openWeChat(): Boolean {
+        val intent = packageManager.getLaunchIntentForPackage(Wallet.WECHAT.packageName) ?: return false
+        return try {
+            startActivity(intent)
+            true
+        } catch (_: ActivityNotFoundException) {
+            false
+        } catch (_: SecurityException) {
+            false
         }
     }
 
@@ -84,11 +138,14 @@ class MainActivity : FlutterActivity() {
     override fun onDestroy() {
         cameraPermissionResult?.success(false)
         cameraPermissionResult = null
+        photoPickerResult?.success(null)
+        photoPickerResult = null
         super.onDestroy()
     }
 
     companion object {
         private const val CAMERA_PERMISSION_REQUEST = 8104
+        private const val PHOTO_PICKER_REQUEST = 8105
     }
 
     @Suppress("DEPRECATION")

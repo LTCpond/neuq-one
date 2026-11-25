@@ -4,6 +4,35 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:neuq_one/core/auth/neuq_login_protocol.dart';
 
 void main() {
+  test('silent reauthentication follows only a valid school CAS login', () {
+    final client = Uri(
+      scheme: 'http',
+      host: schoolIdentityHost,
+      path: '/authserver/login',
+      queryParameters: {
+        'service':
+            'http://$schoolAcademicHost/eams/homeExt.action;jsessionid=ABC',
+      },
+    );
+    expect(academicSessionAddress(client)?.scheme, 'https');
+    expect(academicSessionAddress(client)?.query, client.query);
+    expect(academicReadAddress(client), isNull);
+    expect(
+      academicSessionAddress(client.replace(path: '/authserver/logout')),
+      isNull,
+    );
+    expect(
+      academicSessionAddress(
+        client.replace(
+          queryParameters: {
+            'service': 'https://other.example/eams/homeExt.action',
+          },
+        ),
+      ),
+      isNull,
+    );
+  });
+
   test('school searches upgrade known pages and keep sign-in interactive', () {
     final form = Uri.http(
       schoolAcademicHost,
