@@ -223,13 +223,14 @@ void main() {
         of: header,
         matching: find.byTooltip('选择学期'),
       );
+      final termMenuSize = tester.getSize(termMenu);
       expect(
         tester.getCenter(weekMenu).dx,
         lessThan(tester.getCenter(termMenu).dx),
       );
       expect(
         find.descendant(of: header, matching: find.text(sampleTerm.name)),
-        findsNothing,
+        findsOneWidget,
       );
       await tester.tap(termMenu);
       await tester.pumpAndSettle();
@@ -257,17 +258,19 @@ void main() {
 
       await _tab(tester, '成绩');
       expect(find.text('成绩中心'), findsOneWidget);
-      expect(
-        find.descendant(of: header, matching: find.text(sampleTerm.name)),
-        findsNothing,
+      expect(find.text(sampleTerm.name), findsOneWidget);
+      final gradeSemester = find.descendant(
+        of: find.byType(AppBar),
+        matching: find.byTooltip('选择学期'),
       );
+      final gradeRefresh = find.byTooltip('刷新教务成绩');
+      expect(gradeSemester, findsOneWidget);
+      expect(tester.getSize(gradeSemester), termMenuSize);
       expect(
-        find.descendant(
-          of: find.byType(AppBar),
-          matching: find.byTooltip('选择学期'),
-        ),
-        findsOneWidget,
+        tester.getCenter(gradeSemester).dx,
+        lessThan(tester.getCenter(gradeRefresh).dx),
       );
+      expect(find.byIcon(Icons.refresh_rounded), findsOneWidget);
       await _tab(tester, '服务');
       expect(find.text('校园服务'), findsOneWidget);
       expect(find.text('校园网'), findsOneWidget);
@@ -282,6 +285,9 @@ void main() {
       expect(find.text('人文楼'), findsOneWidget);
       expect(find.text('开始节次'), findsNothing);
       expect(find.text('结束节次'), findsNothing);
+      expect(find.byType(NavigationBar), findsNothing);
+      await tester.tap(find.byType(BackButton));
+      await tester.pumpAndSettle();
 
       await _tab(tester, '我的');
       expect(find.text('学校身份已验证'), findsOneWidget);
@@ -316,12 +322,8 @@ void main() {
     'services display the saved campus card balance and open the card route',
     (tester) async {
       await _tab(tester, '服务');
-      final tile = find.widgetWithText(ListTile, '校园卡');
-      expect(
-        find.descendant(of: tile, matching: find.text('¥12.34')),
-        findsOneWidget,
-      );
-      await tester.tap(tile);
+      expect(find.text('¥12.34'), findsOneWidget);
+      await tester.tap(find.text('校园卡'));
       await tester.pumpAndSettle();
       expect(find.text('打开学校校园卡'), findsOneWidget);
       expect(find.text('在浏览器打开'), findsOneWidget);
@@ -340,8 +342,8 @@ void main() {
       await tester.tap(course);
       await tester.pumpAndSettle();
       expect(
-        tester.widget<AlertDialog>(find.byType(AlertDialog)).alignment,
-        Alignment.center,
+        find.byKey(const ValueKey('course-details-sheet')),
+        findsOneWidget,
       );
       await tester.tap(find.text('编辑课程'));
       await tester.pumpAndSettle();
@@ -371,10 +373,31 @@ void main() {
       addTearDown(tester.view.resetPhysicalSize);
       addTearDown(tester.view.resetDevicePixelRatio);
       await _tab(tester, '课表');
-      final wrappedRoom = find.text('科技楼综合教学区316（学校本部）');
+      final doubleBlock = find.byKey(const ValueKey('timetable-course-double'));
+      Finder inBlock(String label) =>
+          find.descendant(of: doubleBlock, matching: find.text(label));
+      final title = inBlock('连上两节');
+      final wrappedRoom = inBlock('科技楼综合教学区316');
+      final teacher = inBlock('测试教师');
       expect(tester.widget<Text>(wrappedRoom).softWrap, isTrue);
       expect(tester.widget<Text>(wrappedRoom).maxLines, greaterThan(1));
       expect(tester.getSize(wrappedRoom).height, greaterThan(12));
+      for (final field in [title, wrappedRoom, teacher]) {
+        expect(tester.widget<Text>(field).textAlign, TextAlign.start);
+        expect(
+          tester.getTopLeft(field).dx,
+          tester.getTopLeft(doubleBlock).dx + 4,
+        );
+      }
+      expect(
+        tester.getTopLeft(teacher).dy,
+        tester.getBottomLeft(wrappedRoom).dy,
+      );
+      await tester.tap(doubleBlock);
+      await tester.pumpAndSettle();
+      expect(find.text('科技楼综合教学区316（学校本部）'), findsOneWidget);
+      _router(tester).pop();
+      await tester.pumpAndSettle();
       for (final (id, first, last) in [
         ('single', 4, 4),
         ('double', 1, 2),
@@ -433,7 +456,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('3.8000'), findsOneWidget);
-    expect(find.widgetWithText(ListTile, '线性代数'), findsOneWidget);
+    expect(find.text('线性代数'), findsOneWidget);
   });
 
   _appTest('the services menu opens mail and employment within its branch', (
@@ -441,7 +464,7 @@ void main() {
   ) async {
     await _tab(tester, '服务');
     final router = _router(tester);
-    final mail = find.widgetWithText(ListTile, '校园邮箱');
+    final mail = find.text('校园邮箱');
     await tester.scrollUntilVisible(mail, 250);
     await tester.tap(mail);
     await tester.pumpAndSettle();
@@ -451,12 +474,79 @@ void main() {
     expect(find.byType(CampusMailPage), findsOneWidget);
     router.pop();
     await tester.pumpAndSettle();
-    final employment = find.widgetWithText(ListTile, '宣讲会与招聘会');
+    final employment = find.text('宣讲会与招聘会');
     await tester.scrollUntilVisible(employment, 250);
     await tester.tap(employment);
     await tester.pumpAndSettle();
     expect(find.byType(EmploymentPage), findsOneWidget);
   });
+
+  testWidgets(
+    'employment cards separate title, time and location on a narrow screen',
+    (tester) async {
+      tester.view.physicalSize = const Size(320, 660);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      const title = '校园招聘专场宣讲会及毕业生就业咨询';
+      const time = '11月27日 · 14:00–16:00';
+      const location = '科技楼综合教学区 316';
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            employmentCacheProvider.overrideWith((ref) async => null),
+            employmentRefreshProvider.overrideWith(
+              (ref, force) async => (
+                syncedAt: classroomNow,
+                events: [
+                  EmploymentEvent(
+                    EmploymentKind.talk,
+                    title,
+                    time,
+                    location,
+                    EmploymentKind.talk.uri,
+                  ),
+                  EmploymentEvent(
+                    EmploymentKind.talk,
+                    '第二场宣讲',
+                    time,
+                    '',
+                    EmploymentKind.talk.uri,
+                  ),
+                  EmploymentEvent(
+                    EmploymentKind.fair,
+                    '校园综合招聘',
+                    time,
+                    location,
+                    EmploymentKind.fair.uri,
+                  ),
+                ],
+              ),
+            ),
+          ],
+          child: const MaterialApp(home: EmploymentPage()),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(
+        tester.getBottomLeft(find.text(title)).dy,
+        lessThan(tester.getTopLeft(find.text(time).first).dy),
+      );
+      expect(
+        tester.getBottomLeft(find.text(time).first).dy,
+        lessThan(tester.getTopLeft(find.text(location)).dy),
+      );
+      expect(
+        tester.getBottomLeft(find.byType(Card).first).dy,
+        lessThan(tester.getTopLeft(find.byType(Card).last).dy),
+      );
+      expect(find.text('校园综合招聘'), findsNothing);
+      await tester.tap(find.text('招聘会'));
+      await tester.pumpAndSettle();
+      expect(find.text('校园综合招聘'), findsOneWidget);
+      expect(find.text(title), findsNothing);
+      expect(tester.takeException(), isNull);
+    },
+  );
 
   var classroomReads = 0;
   _appTest(
@@ -472,18 +562,15 @@ void main() {
       await tester.tap(find.text('空教室'));
       await tester.pumpAndSettle();
       expect(find.text('数据更新于 16:19'), findsOneWidget);
-      expect(find.text('第 1–2 节'), findsOneWidget);
-      expect(find.text('红色 · 下节有课'), findsOneWidget);
-      expect(
-        tester.widgetList<ChoiceChip>(find.byType(ChoiceChip)),
-        hasLength(3),
-      );
+      expect(find.text('1–2 节'), findsOneWidget);
+      expect(find.text('下节有课'), findsOneWidget);
       final booked = find.text('101');
       final ordinary = find.text('102').first;
       final upperFloor = find.text('207');
-      final colors = Theme.of(tester.element(booked)).colorScheme;
-      expect(tester.widget<Text>(booked).style?.color, colors.error);
-      expect(tester.widget<Text>(ordinary).style?.color, colors.onSurface);
+      expect(
+        tester.widget<Text>(booked).style?.color,
+        isNot(tester.widget<Text>(ordinary).style?.color),
+      );
       expect(find.text('2层'), findsOneWidget);
       expect(
         tester.getTopLeft(upperFloor).dy,
@@ -511,6 +598,17 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('301'), findsWidgets);
       expect(find.text('101'), findsNothing);
+      await tester.tap(find.text('科技楼'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byTooltip('表格视图'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byType(BackButton));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('空教室'));
+      await tester.pumpAndSettle();
+      expect(find.text('教室空闲表'), findsOneWidget);
+      expect(find.text('12月1日 · 星期二'), findsOneWidget);
+      expect(find.text('6077'), findsWidgets);
       expect(classroomReads, 1);
     },
     classroomResponse: () {
@@ -520,6 +618,58 @@ void main() {
   );
 
   var classroomTime = DateTime.utc(2026, 11, 25, 15, 59, 59);
+  _appTest(
+    'classroom table distinguishes free, unlisted, and expired slots',
+    (tester) async {
+      await _tab(tester, '服务');
+      await tester.tap(find.text('空教室'));
+      await tester.pumpAndSettle();
+      expect(find.text('分时段查询'), findsOneWidget);
+      await tester.tap(find.byTooltip('表格视图'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('教室空闲表'), findsOneWidget);
+      final semantics = tester.ensureSemantics();
+      try {
+        await tester.pump();
+        final free = find.bySemanticsLabel('101，第 1 节开始，空闲');
+        final unlisted = find.bySemanticsLabel('101，第 3 节开始，未列为空闲');
+        final expired = find.bySemanticsLabel('101，第 5 节开始，暂无有效数据');
+        Finder fill(Finder cell, Color color) => find.descendant(
+          of: cell,
+          matching: find.byWidgetPredicate(
+            (widget) =>
+                widget is DecoratedBox &&
+                widget.decoration is BoxDecoration &&
+                (widget.decoration as BoxDecoration).color == color,
+          ),
+        );
+        expect(fill(free, const Color(0xFF2459E0)), findsOneWidget);
+        expect(unlisted, findsOneWidget);
+        expect(fill(unlisted, const Color(0xFF2459E0)), findsNothing);
+        expect(fill(expired, const Color(0xFFDCE1E9)), findsOneWidget);
+      } finally {
+        semantics.dispose();
+      }
+      expect(find.text('?'), findsWidgets);
+      expect(find.byIcon(Icons.check), findsNothing);
+
+      await tester.tap(find.byTooltip('时间轴视图'));
+      await tester.pumpAndSettle();
+      expect(find.text('分时段查询'), findsOneWidget);
+      final stale = find.textContaining('数据已过期，仅供参考');
+      await tester.scrollUntilVisible(stale, 150);
+      expect(stale, findsOneWidget);
+    },
+    classroomResponse: () {
+      final week = classroomWeekFixture();
+      fixturePeriods(week)['5-6'] = classroomSlotFixture([
+        '101',
+      ], expiresAt: '2026-11-25T16:19:30+08:00');
+      return http.Response.bytes(utf8.encode(jsonEncode(week)), 200);
+    },
+  );
+
   var midnightReads = 0;
   _appTest(
     'Beijing midnight uses only matching cached dates when the public API fails',
@@ -529,11 +679,12 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('101'), findsOneWidget);
       expect(find.textContaining('数据已过期，仅供参考'), findsWidgets);
+      expect(find.textContaining('已有记录均已过期'), findsOneWidget);
 
       classroomTime = classroomTime.add(const Duration(seconds: 1));
       await tester.pump(const Duration(seconds: 1));
       await tester.pumpAndSettle();
-      expect(find.text('今天 · 11月26日'), findsOneWidget);
+      expect(find.text('11月26日 · 星期四'), findsOneWidget);
       expect(find.text('101'), findsNothing);
       expect(find.text('301'), findsWidgets);
       expect(find.text('更新失败，正在显示上次数据'), findsOneWidget);
@@ -565,13 +716,12 @@ void main() {
       await tester.tap(find.text('空教室'));
       await tester.pumpAndSettle();
       final room = find.text('101');
-      final color = Theme.of(tester.element(room)).colorScheme;
-      expect(tester.widget<Text>(room).style?.color, color.error);
+      final freshColor = tester.widget<Text>(room).style?.color;
       expect(find.textContaining('数据已过期，仅供参考'), findsNothing);
       expiryTime = expiryTime.add(const Duration(seconds: 1));
       await tester.pump(const Duration(seconds: 1));
       await tester.pumpAndSettle();
-      expect(tester.widget<Text>(room).style?.color, color.onSurface);
+      expect(tester.widget<Text>(room).style?.color, isNot(freshColor));
       expect(find.textContaining('数据已过期，仅供参考'), findsWidgets);
       final historicalEmpty = find.text('上次采集时未发现空教室');
       await tester.scrollUntilVisible(
@@ -608,10 +758,11 @@ void main() {
       expect(cardRepository.refreshes, 1);
 
       cardRepository.nextBalance = (cents: 5678, readAt: DateTime.utc(2026));
-      _router(tester).go('/services/classrooms');
+      final router = _router(tester);
+      router.go('/services/classrooms');
       await tester.pumpAndSettle();
       expect(cardRepository.refreshes, 1);
-      _router(tester).pop();
+      router.pop();
       await tester.pumpAndSettle();
       expect(cardRepository.refreshes, 2);
       expect(find.text('¥56.78'), findsOneWidget);
@@ -846,7 +997,7 @@ Future<void> _createSemester(WidgetTester tester) async {
   await tester.enterText(find.byType(TextFormField).first, '测试学期');
   await tester.tap(find.widgetWithText(FilledButton, '保存'));
   await tester.pumpAndSettle();
-  expect(find.text('测试学期'), findsNothing);
+  expect(find.text('测试学期'), findsOneWidget);
   await tester.tap(find.byTooltip('选择学期'));
   await tester.pumpAndSettle();
   final term = find.widgetWithText(CheckedPopupMenuItem<String>, '测试学期');

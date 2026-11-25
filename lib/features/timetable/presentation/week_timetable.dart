@@ -1,9 +1,10 @@
 import 'package:material_ui/material_ui.dart';
 
+import '../../../core/theme/app_theme.dart';
 import '../../../core/time/campus_clock.dart';
 import '../../../core/time/neuq_periods.dart';
 import '../domain/timetable.dart';
-import 'timetable_editors.dart';
+import 'timetable_palette.dart';
 
 class WeekMenu extends StatelessWidget {
   const WeekMenu({
@@ -23,14 +24,58 @@ class WeekMenu extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final term = semester;
-    if (term == null) {
-      return Text(_dateLabel(today), style: theme.textTheme.titleMedium);
-    }
-    final date = term.weekFor(today) == week
-        ? today
-        : week == 1
-        ? term.start
-        : term.dateFor(week, DateTime.monday);
+    final muted = theme.colorScheme.onSurfaceVariant;
+    final start = term?.dateFor(week, DateTime.monday);
+    final end = term?.dateFor(week, DateTime.sunday);
+    final heading = Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'NEUQ · TIMETABLE',
+          style: TextStyle(
+            fontSize: 10,
+            color: muted,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        const SizedBox(height: 5),
+        FittedBox(
+          fit: BoxFit.scaleDown,
+          alignment: Alignment.centerLeft,
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                term == null ? '课表' : '第 $week 周',
+                style: theme.textTheme.headlineMedium,
+              ),
+              if (term != null) ...[
+                const SizedBox(width: 8),
+                const Icon(Icons.arrow_drop_down, size: 22),
+              ],
+            ],
+          ),
+        ),
+        const SizedBox(height: 5),
+        FittedBox(
+          fit: BoxFit.scaleDown,
+          alignment: Alignment.centerLeft,
+          child: Text(
+            start == null
+                ? shortDate(today)
+                : '${shortDate(start)} – ${shortDate(end!)}',
+            maxLines: 1,
+            style: TextStyle(
+              fontSize: 12,
+              color: muted,
+              fontWeight: FontWeight.w400,
+            ),
+          ),
+        ),
+      ],
+    );
+    if (term == null) return heading;
     return PopupMenuButton<int>(
       tooltip: '选择教学周',
       initialValue: week,
@@ -40,42 +85,10 @@ class WeekMenu extends StatelessWidget {
         for (var index = 1; index <= term.weeks; index++)
           PopupMenuItem(value: index, child: Text('第 $index 周')),
       ],
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 6),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Flexible(
-                  child: Text('第 $week 周', style: theme.textTheme.titleLarge),
-                ),
-                const SizedBox(width: 3),
-                Icon(
-                  Icons.expand_more,
-                  size: 16,
-                  color: theme.colorScheme.onSurfaceVariant,
-                ),
-              ],
-            ),
-            Text(
-              '${_dateLabel(date)} · ${weekdayLabel(date.weekday)}',
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: theme.textTheme.labelMedium?.copyWith(
-                color: theme.colorScheme.onSurfaceVariant,
-              ),
-            ),
-          ],
-        ),
-      ),
+      child: heading,
     );
   }
 }
-
-String _dateLabel(DateTime date) => '${date.year}/${date.month}/${date.day}';
 
 class WeekTimetable extends StatelessWidget {
   const WeekTimetable({
@@ -109,6 +122,7 @@ class WeekTimetable extends StatelessWidget {
     final end = semester.dateFor(week, DateTime.sunday);
     final todayInWeek = !today.isBefore(start) && !today.isAfter(end);
     return Card(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
       clipBehavior: Clip.antiAlias,
       child: Column(
         children: [
@@ -117,7 +131,6 @@ class WeekTimetable extends StatelessWidget {
               padding: const EdgeInsets.only(bottom: 8),
               child: Text('本周暂无课程', style: theme.textTheme.labelMedium),
             ),
-          const Divider(height: 1),
           MediaQuery.withClampedTextScaling(
             maxScaleFactor: 1.3,
             child: GestureDetector(
@@ -128,55 +141,59 @@ class WeekTimetable extends StatelessWidget {
               },
               child: LayoutBuilder(
                 builder: (context, constraints) {
-                  final rail = constraints.maxWidth < 365 ? 37.0 : 43.0;
-                  final rowHeight =
-                      ((MediaQuery.sizeOf(context).height - 220) / 10).clamp(
-                        52.0,
-                        72.0,
-                      );
-                  return Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      SizedBox(
-                        width: rail,
-                        child: Column(
-                          children: [
-                            SizedBox(
-                              height: 61,
-                              child: Center(
-                                child: Text(
-                                  '${start.month}月',
-                                  style: theme.textTheme.labelSmall,
+                  final rail = constraints.maxWidth < 340 ? 33.0 : 38.0;
+                  const rowHeight = 52.0;
+                  return Padding(
+                    padding: const EdgeInsets.only(right: 4),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        SizedBox(
+                          width: rail,
+                          child: Column(
+                            children: [
+                              SizedBox(
+                                height: 54,
+                                child: Center(
+                                  child: Text(
+                                    '${start.month}月',
+                                    style: TextStyle(
+                                      fontSize: 10,
+                                      color: theme.colorScheme.onSurfaceVariant,
+                                    ),
+                                  ),
                                 ),
                               ),
-                            ),
-                            for (final (index, period) in neuqPeriods.indexed)
-                              _PeriodNumber(
-                                period: index + 1,
-                                start: period.start,
-                                end: period.end,
-                                height: rowHeight,
-                              ),
-                          ],
-                        ),
-                      ),
-                      for (final (index, courses) in days.indexed)
-                        Expanded(
-                          child: _DayColumn(
-                            date: start.add(Duration(days: index)),
-                            current: todayInWeek && today.weekday == index + 1,
-                            height: rowHeight,
-                            courses: courses,
-                            onDate: onDate,
-                            onCourse: onCourse,
+                              for (final (index, period) in neuqPeriods.indexed)
+                                _PeriodNumber(
+                                  period: index + 1,
+                                  start: period.start,
+                                  end: period.end,
+                                  height: rowHeight,
+                                ),
+                            ],
                           ),
                         ),
-                    ],
+                        for (final (index, courses) in days.indexed)
+                          Expanded(
+                            child: _DayColumn(
+                              date: start.add(Duration(days: index)),
+                              current:
+                                  todayInWeek && today.weekday == index + 1,
+                              height: rowHeight,
+                              courses: courses,
+                              onDate: onDate,
+                              onCourse: onCourse,
+                            ),
+                          ),
+                      ],
+                    ),
                   );
                 },
               ),
             ),
           ),
+          const SizedBox(height: 4),
         ],
       ),
     );
@@ -200,8 +217,8 @@ class _PeriodNumber extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
     final clockStyle = TextStyle(
-      fontSize: 9,
-      height: 1.25,
+      fontSize: 8,
+      height: 1.35,
       color: colors.onSurfaceVariant,
     );
     Widget clock(int minutes) => FittedBox(
@@ -210,6 +227,7 @@ class _PeriodNumber extends StatelessWidget {
     );
     return Container(
       key: ValueKey('timetable-period-$period'),
+      width: double.infinity,
       height: height,
       decoration: BoxDecoration(border: _rowBorder(colors, period - 1)),
       child: Column(
@@ -218,7 +236,7 @@ class _PeriodNumber extends StatelessWidget {
           Text(
             '$period',
             style: TextStyle(
-              fontSize: 14,
+              fontSize: 12,
               height: 1.15,
               fontWeight: FontWeight.w700,
               color: colors.onSurface,
@@ -259,7 +277,11 @@ class _DayColumn extends StatelessWidget {
         border: Border(
           left: BorderSide(color: colors.outlineVariant.withValues(alpha: .55)),
         ),
-        color: current ? colors.primaryContainer.withValues(alpha: .23) : null,
+        color: current
+            ? (theme.brightness == Brightness.dark
+                  ? const Color(0xFF202D45)
+                  : const Color(0xFFEEF2FF))
+            : null,
       ),
       child: Column(
         children: [
@@ -267,7 +289,7 @@ class _DayColumn extends StatelessWidget {
             key: ValueKey(date),
             onTap: () => onDate(date),
             child: SizedBox(
-              height: 61,
+              height: 54,
               width: double.infinity,
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
@@ -281,19 +303,19 @@ class _DayColumn extends StatelessWidget {
                       color: current ? colors.primary : colors.onSurfaceVariant,
                     ),
                   ),
-                  const SizedBox(height: 3),
+                  const SizedBox(height: 2),
                   Container(
                     alignment: Alignment.center,
                     height: 22,
                     width: 24,
                     decoration: BoxDecoration(
-                      color: current ? colors.primary : null,
+                      color: current ? campusBlue : null,
                       borderRadius: BorderRadius.circular(8),
                     ),
                     child: Text(
                       '${date.day}',
                       style: theme.textTheme.labelSmall?.copyWith(
-                        color: current ? colors.onPrimary : colors.onSurface,
+                        color: current ? Colors.white : colors.onSurface,
                         fontWeight: FontWeight.w700,
                       ),
                     ),
@@ -320,9 +342,9 @@ class _DayColumn extends StatelessWidget {
                   ),
                   for (final block in blocks)
                     Positioned(
-                      left: 2 + size.maxWidth * block.lane / block.lanes,
+                      left: 1 + size.maxWidth * block.lane / block.lanes,
                       top: height * block.start + 2,
-                      width: (size.maxWidth / block.lanes - 4).clamp(
+                      width: (size.maxWidth / block.lanes - 2).clamp(
                         1.0,
                         double.infinity,
                       ),
@@ -344,9 +366,8 @@ class _DayColumn extends StatelessWidget {
 
 Border _rowBorder(ColorScheme colors, int index) => Border(
   top: BorderSide(
-    color: colors.outlineVariant.withValues(
-      alpha: index == 0 || index == 4 || index == 8 ? .85 : .40,
-    ),
+    color: colors.outlineVariant,
+    width: index == 0 || index == 4 || index == 8 ? 1.2 : .65,
   ),
 );
 
@@ -358,20 +379,12 @@ class _CourseBlock extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final colors = theme.colorScheme;
-    final hue = courseColors[course.colorIndex % courseColors.length];
-    final dark = theme.brightness == Brightness.dark;
-    final surface = Color.alphaBlend(
-      hue.withValues(alpha: dark ? .39 : .17),
-      colors.surface,
-    );
-    final text = dark
-        ? colors.onSurface
-        : Color.alphaBlend(Colors.black.withValues(alpha: .68), hue);
+    final (surface, text) = courseBlockColors(context, course.colorIndex);
+    final details = [course.name, course.time, course.room, course.teacher];
     return Semantics(
       button: true,
-      label: '${course.name}，${course.time}，${course.room}',
+      label: details.where((value) => value.isNotEmpty).join('，'),
+      onTap: onTap,
       excludeSemantics: true,
       child: Material(
         key: ValueKey('timetable-course-${course.id}'),
@@ -380,74 +393,126 @@ class _CourseBlock extends StatelessWidget {
         clipBehavior: Clip.antiAlias,
         child: InkWell(
           onTap: onTap,
-          child: Container(
-            decoration: BoxDecoration(
-              border: Border(top: BorderSide(color: hue, width: 2)),
-            ),
-            padding: const EdgeInsets.fromLTRB(3, 4, 3, 3),
-            child: LayoutBuilder(
-              builder: (context, size) {
-                final scale = MediaQuery.textScalerOf(context);
-                final detailLine = scale.scale(9) * 1.2;
-                final titleLines = size.maxHeight >= 70 ? 2 : 1;
-                final titleHeight = scale.scale(11) * 1.15 * titleLines;
-                final showTeacher =
-                    course.teacher.isNotEmpty &&
-                    size.maxHeight >= 82 &&
-                    size.maxHeight >= titleHeight + detailLine * 3;
-                final roomHeight =
-                    size.maxHeight -
-                    titleHeight -
-                    (showTeacher ? detailLine : 0);
-                final roomLines = (roomHeight / detailLine).floor();
-                final detailStyle = TextStyle(
-                  fontSize: 9,
-                  height: 1.2,
-                  color: text,
-                );
-                return Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Flexible(
-                      child: Text(
-                        course.name,
-                        maxLines: size.maxHeight >= 70 ? 4 : 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          fontSize: 11,
-                          height: 1.15,
-                          fontWeight: FontWeight.w800,
-                          color: text,
-                        ),
-                      ),
+          child: LayoutBuilder(
+            builder: (context, size) {
+              final narrow = size.maxWidth < 34;
+              final horizontalPadding = narrow
+                  ? 2.0
+                  : (size.maxWidth < 40 ? 3.0 : 4.0);
+              final padding = EdgeInsets.fromLTRB(
+                horizontalPadding,
+                5,
+                horizontalPadding,
+                3,
+              );
+              final compact = narrow || size.maxHeight < 55;
+              final phoneWidth = size.maxWidth < 48;
+              final detailStyle = TextStyle(
+                fontSize: compact ? 9 : (phoneWidth ? 9.5 : 10),
+                height: 1.14,
+                fontWeight: FontWeight.w400,
+                color: text,
+              );
+              return Padding(
+                padding: padding,
+                child: _courseText(context, padding.deflateSize(size.biggest), [
+                  (
+                    course.name,
+                    detailStyle.copyWith(
+                      fontSize: compact ? 10 : (phoneWidth ? 11 : 12),
+                      fontWeight: FontWeight.w700,
                     ),
-                    if (course.room.isNotEmpty && roomLines > 0)
-                      ConstrainedBox(
-                        constraints: BoxConstraints(maxHeight: roomHeight),
-                        child: Text(
-                          course.room,
-                          maxLines: roomLines,
-                          softWrap: true,
-                          overflow: TextOverflow.ellipsis,
-                          style: detailStyle,
-                        ),
-                      ),
-                    if (showTeacher)
-                      Text(
-                        course.teacher,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: detailStyle,
-                      ),
-                  ],
-                );
-              },
-            ),
+                    compact ? 2 : 4,
+                  ),
+                  if (course.room.isNotEmpty)
+                    (_timetableRoom(course.room), detailStyle, compact ? 2 : 4),
+                  if (course.teacher.isNotEmpty)
+                    (course.teacher, detailStyle, compact ? 1 : 2),
+                ]),
+              );
+            },
           ),
         ),
       ),
     );
   }
+}
+
+final _mainCampusRoom = RegExp(
+  r'^((?:工学馆|科技楼|人文楼)[^（）()、，,;/／]*\d)\s*(?:\(学校本部\)|（学校本部）)$',
+);
+
+String _timetableRoom(String room) =>
+    _mainCampusRoom.firstMatch(room.trim())?.group(1) ?? room;
+
+Widget _courseText(
+  BuildContext context,
+  Size size,
+  List<(String, TextStyle, int)> fields,
+) {
+  if (size.width < 9) return const SizedBox.shrink();
+  final defaults = DefaultTextStyle.of(context);
+  final bold = MediaQuery.boldTextOf(context);
+  final painter = TextPainter(
+    textDirection: Directionality.of(context),
+    textScaler: MediaQuery.textScalerOf(context),
+    locale: Localizations.maybeLocaleOf(context),
+    textHeightBehavior: defaults.textHeightBehavior,
+    ellipsis: '…',
+  );
+  final lineCounts = <int>[];
+  final heights = <double>[];
+  var remaining = size.height;
+
+  double measure((String, TextStyle, int) field, int lines) {
+    final style = defaults.style.merge(field.$2);
+    painter
+      ..text = TextSpan(
+        text: field.$1,
+        style: bold
+            ? style.merge(const TextStyle(fontWeight: FontWeight.bold))
+            : style,
+      )
+      ..maxLines = lines
+      ..layout(maxWidth: size.width);
+    return painter.height;
+  }
+
+  // Reserve one line for each detail before giving longer fields more space.
+  for (final field in fields) {
+    final height = measure(field, 1);
+    if (height > remaining) break;
+    lineCounts.add(1);
+    heights.add(height);
+    remaining -= height;
+  }
+  for (final (index, field) in fields.take(lineCounts.length).indexed) {
+    for (var lines = 2; lines <= field.$3; lines++) {
+      final height = measure(field, lines);
+      final extra = height - heights[index];
+      if (extra > remaining) break;
+      lineCounts[index] = lines;
+      heights[index] = height;
+      remaining -= extra;
+      if (!painter.didExceedMaxLines) break;
+    }
+  }
+  painter.dispose();
+
+  return Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      for (final (index, lines) in lineCounts.indexed)
+        Text(
+          fields[index].$1,
+          style: fields[index].$2,
+          textAlign: TextAlign.start,
+          maxLines: lines,
+          softWrap: true,
+          overflow: TextOverflow.ellipsis,
+        ),
+    ],
+  );
 }
 
 typedef _Block = ({Course course, int start, int end, int lane, int lanes});

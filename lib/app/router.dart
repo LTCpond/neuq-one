@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 
 import '../core/auth/school_auth.dart';
 import '../core/database/school_data.dart';
+import '../core/theme/app_theme.dart';
 import '../features/grades/presentation/grades_page.dart';
 import '../features/mail/presentation/campus_mail_page.dart';
 import '../features/profile/data/course_reminders.dart';
@@ -20,41 +21,19 @@ const _timetablePath = '/timetable';
 const _servicesPath = '/services';
 
 const _tabs = [
-  (
-    path: _timetablePath,
-    label: '课表',
-    icon: Icons.calendar_month_outlined,
-    selected: Icons.calendar_month_rounded,
-    page: TimetablePage(),
-  ),
-  (
-    path: '/grades',
-    label: '成绩',
-    icon: Icons.insights_outlined,
-    selected: Icons.insights_rounded,
-    page: GradesPage(),
-  ),
-  (
-    path: _servicesPath,
-    label: '服务',
-    icon: Icons.grid_view_outlined,
-    selected: Icons.grid_view_rounded,
-    page: ServicesPage(),
-  ),
-  (
-    path: '/profile',
-    label: '我的',
-    icon: Icons.person_outline,
-    selected: Icons.person_rounded,
-    page: ProfilePage(),
-  ),
+  (path: _timetablePath, label: '课表', icon: 'timetable', page: TimetablePage()),
+  (path: '/grades', label: '成绩', icon: 'grades', page: GradesPage()),
+  (path: _servicesPath, label: '服务', icon: 'services', page: ServicesPage()),
+  (path: '/profile', label: '我的', icon: 'profile', page: ProfilePage()),
 ];
 
 final routerProvider = Provider<GoRouter>((ref) {
   final subject = ref.watch(
     schoolSessionProvider.select((value) => value.asData?.value?.subject),
   );
+  final rootNavigator = GlobalKey<NavigatorState>();
   final router = GoRouter(
+    navigatorKey: rootNavigator,
     initialLocation: _timetablePath,
     redirect: (context, state) {
       final onLogin = state.matchedLocation == '/login';
@@ -79,6 +58,7 @@ final routerProvider = Provider<GoRouter>((ref) {
                     if (tab.path == _servicesPath) ...[
                       GoRoute(
                         path: 'classrooms',
+                        parentNavigatorKey: rootNavigator,
                         builder: (context, state) => const ClassroomsPage(),
                       ),
                       GoRoute(
@@ -139,30 +119,67 @@ class _NavigationState extends ConsumerState<_Navigation> {
   @override
   Widget build(BuildContext context) {
     final shell = widget.shell;
+    final colors = Theme.of(context).colorScheme;
     // Keep foreground sync active even when the timetable branch is offstage.
     ref.listen(schoolRefreshProvider(SchoolDataSet.timetable), (_, _) {});
     return Scaffold(
-      body: shell,
-      bottomNavigationBar: NavigationBar(
-        selectedIndex: shell.currentIndex,
-        onDestinationSelected: (index) {
-          final section = switch (_tabs[index].path) {
-            '/grades' => SchoolDataSet.grades,
-            _timetablePath => SchoolDataSet.timetable,
-            _ => null,
-          };
-          if (section != null) ref.invalidate(schoolRefreshProvider(section));
-          shell.goBranch(index);
-        },
-        destinations: [
-          for (final tab in _tabs)
-            NavigationDestination(
-              icon: Icon(tab.icon),
-              selectedIcon: Icon(tab.selected),
-              label: tab.label,
-            ),
-        ],
+      body: TickerMode(
+        enabled: ModalRoute.isCurrentOf(context) ?? true,
+        child: shell,
+      ),
+      bottomNavigationBar: DecoratedBox(
+        position: DecorationPosition.foreground,
+        decoration: BoxDecoration(
+          border: Border(top: BorderSide(color: colors.outlineVariant)),
+        ),
+        child: NavigationBar(
+          selectedIndex: shell.currentIndex,
+          onDestinationSelected: (index) {
+            final section = switch (_tabs[index].path) {
+              '/grades' => SchoolDataSet.grades,
+              _timetablePath => SchoolDataSet.timetable,
+              _ => null,
+            };
+            if (section != null) ref.invalidate(schoolRefreshProvider(section));
+            shell.goBranch(index);
+          },
+          destinations: [
+            for (final tab in _tabs)
+              NavigationDestination(
+                icon: _TabIcon(tab.icon),
+                selectedIcon: _TabIcon(tab.icon, selected: true),
+                label: tab.label,
+              ),
+          ],
+        ),
       ),
     );
   }
+}
+
+class _TabIcon extends StatelessWidget {
+  const _TabIcon(this.name, {this.selected = false});
+
+  final String name;
+  final bool selected;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    width: 54,
+    height: 30,
+    alignment: Alignment.center,
+    decoration: BoxDecoration(
+      color: selected ? const Color(0xFFE0E8FF) : Colors.transparent,
+      borderRadius: BorderRadius.circular(11),
+    ),
+    child: Image.asset(
+      'assets/ui/nav-$name.png',
+      width: 24,
+      height: 24,
+      color: selected
+          ? campusBlue
+          : Theme.of(context).colorScheme.onSurfaceVariant,
+      excludeFromSemantics: true,
+    ),
+  );
 }

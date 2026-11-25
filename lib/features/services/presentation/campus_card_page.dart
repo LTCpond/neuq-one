@@ -6,6 +6,7 @@ import 'package:webview_flutter/webview_flutter.dart';
 import 'package:webview_flutter_android/webview_flutter_android.dart';
 
 import '../../../core/network/official_browser.dart';
+import '../../../core/widgets/campus_components.dart';
 import '../../../core/widgets/screen.dart';
 import '../data/campus_card_balance.dart';
 import '../data/campus_card_camera.dart';
@@ -355,10 +356,14 @@ class _CampusCardWebViewState extends ConsumerState<_CampusCardWebView> {
             tooltip: '在微信使用校园卡扫一扫',
             onPressed: _showWeChatScan,
           ),
-          IconButton(
-            icon: const Icon(Icons.refresh),
+          CampusRefreshButton(
             tooltip: '重新打开校园卡',
-            onPressed: _loading ? null : _open,
+            isLoading: _loading,
+            onPressed: () {
+              if (_loading) return;
+              setState(() => _loading = true);
+              unawaited(_open());
+            },
           ),
           IconButton(
             icon: const Icon(Icons.open_in_new),

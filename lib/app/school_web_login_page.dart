@@ -6,6 +6,7 @@ import 'package:webview_flutter_android/webview_flutter_android.dart';
 
 import '../core/auth/neuq_login_protocol.dart';
 import '../core/auth/school_auth.dart';
+import '../core/widgets/campus_components.dart';
 
 class SchoolWebLoginPage extends StatefulWidget {
   const SchoolWebLoginPage({super.key, this.expectedSubject});
@@ -166,10 +167,14 @@ class _SchoolWebLoginPageState extends State<SchoolWebLoginPage> {
     appBar: AppBar(
       title: const Text('东秦登录'),
       actions: [
-        IconButton(
-          onPressed: _loading ? null : () => _load(schoolWebEntry),
+        CampusRefreshButton(
           tooltip: '重开登录页',
-          icon: const Icon(Icons.refresh),
+          isLoading: _loading,
+          onPressed: () {
+            if (_loading) return;
+            setState(() => _loading = true);
+            unawaited(_load(schoolWebEntry));
+          },
         ),
         PopupMenuButton<Uri>(
           tooltip: '选择学校登录入口',

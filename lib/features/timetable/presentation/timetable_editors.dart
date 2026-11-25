@@ -5,15 +5,7 @@ import '../../../core/time/campus_clock.dart';
 import '../../../core/time/neuq_periods.dart';
 import '../../../core/widgets/editor.dart';
 import '../domain/timetable.dart';
-
-const courseColors = [
-  Color(0xFF087569),
-  Color(0xFF3860B8),
-  Color(0xFF8A4998),
-  Color(0xFFAE5530),
-  Color(0xFF977000),
-  Color(0xFFAC4263),
-];
+import 'timetable_palette.dart';
 
 Future<void> editSemester(
   BuildContext context,
@@ -218,13 +210,15 @@ Future<void> editCourse(
           Wrap(
             spacing: 6,
             children: [
-              for (var index = 0; index < courseColors.length; index++)
+              for (final (index, (_, foreground)) in coursePalette(
+                context,
+              ).indexed)
                 ChoiceChip(
                   labelPadding: EdgeInsets.zero,
                   label: Icon(
                     Icons.circle,
                     size: 16,
-                    color: courseColors[index],
+                    color: foreground,
                     semanticLabel: '颜色 ${index + 1}',
                   ),
                   selected: index == color,

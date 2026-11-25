@@ -25,42 +25,45 @@ const campusCardService = CampusService.inApp(
   '/services/campus-card',
 );
 
-const campusServiceGroups = {
-  '教学': [
-    CampusService.website(
-      '教务系统',
-      Icons.school_outlined,
-      'https://jwxt.neuq.edu.cn/eams/localLogin.action',
-    ),
-    CampusService.website(
-      '校园地图',
-      Icons.map_outlined,
-      'https://yx.neuq.edu.cn/shgl/xxdt.htm',
-    ),
-  ],
-  '办事与访问': [
-    CampusService.website(
-      '一网通办',
-      Icons.apps_rounded,
-      'https://eone.neuq.edu.cn/',
-    ),
-    CampusService.website(
-      '校园网',
-      Icons.wifi_rounded,
-      'https://ipgate.neuq.edu.cn/',
-    ),
-    CampusService.inApp('校园邮箱', Icons.mail_outline_rounded, '/services/mail'),
-    CampusService.website(
-      'WebVPN',
-      Icons.vpn_lock_outlined,
-      'https://vpn.neuq.edu.cn/',
-    ),
-  ],
-  '就业': [
-    CampusService.inApp(
-      '宣讲会与招聘会',
-      Icons.work_outline_rounded,
-      '/services/employment',
-    ),
-  ],
-};
+const campusMailService = CampusService.inApp(
+  '校园邮箱',
+  Icons.mail_outline_rounded,
+  '/services/mail',
+);
+const employmentService = CampusService.inApp(
+  '宣讲会与招聘会',
+  Icons.work_outline_rounded,
+  '/services/employment',
+);
+
+const academicServices = [
+  CampusService.website(
+    '教务系统',
+    Icons.school_outlined,
+    'https://jwxt.neuq.edu.cn/eams/localLogin.action',
+  ),
+  CampusService.website(
+    '校园地图',
+    Icons.map_outlined,
+    'https://yx.neuq.edu.cn/shgl/xxdt.htm',
+  ),
+];
+
+const accessServices = [
+  CampusService.website(
+    '一网通办',
+    Icons.apps_rounded,
+    'https://eone.neuq.edu.cn/',
+  ),
+  CampusService.website(
+    '校园网',
+    Icons.wifi_rounded,
+    'https://ipgate.neuq.edu.cn/',
+  ),
+];
+
+const webVpnService = CampusService.website(
+  'WebVPN',
+  Icons.vpn_lock_outlined,
+  'https://vpn.neuq.edu.cn/',
+);

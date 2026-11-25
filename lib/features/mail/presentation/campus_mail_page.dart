@@ -5,6 +5,7 @@ import 'package:material_ui/material_ui.dart';
 
 import '../../../core/network/official_browser.dart';
 import '../../../core/time/campus_clock.dart';
+import '../../../core/widgets/campus_components.dart';
 import '../../../core/widgets/editor.dart';
 import '../../../core/widgets/screen.dart';
 import '../data/campus_mail.dart';
@@ -216,10 +217,10 @@ class _MailboxState extends State<_Mailbox> {
             tooltip: '搜索邮件',
             icon: const Icon(Icons.search),
           ),
-          IconButton(
-            onPressed: _busy ? null : _load,
+          CampusRefreshButton(
             tooltip: '刷新邮件',
-            icon: const Icon(Icons.refresh),
+            isLoading: _busy,
+            onPressed: _load,
           ),
           PopupMenuButton<String>(
             enabled: !_busy,

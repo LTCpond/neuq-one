@@ -3,6 +3,7 @@ import 'package:material_ui/material_ui.dart';
 
 import '../../../core/network/official_browser.dart';
 import '../../../core/time/campus_clock.dart';
+import '../../../core/widgets/campus_components.dart';
 import '../../../core/widgets/screen.dart';
 import '../data/employment_feed.dart';
 
@@ -35,10 +36,10 @@ class _EmploymentPageState extends ConsumerState<EmploymentPage> {
       title: '宣讲会与招聘会',
       eyebrow: '学校就业信息网',
       actions: [
-        IconButton(
-          onPressed: current.isLoading ? null : refresh,
-          icon: const Icon(Icons.refresh),
+        CampusRefreshButton(
           tooltip: '刷新就业活动',
+          isLoading: current.isLoading,
+          onPressed: refresh,
         ),
         IconButton(
           onPressed: () => openOfficialPage(context, _kind.uri.toString()),
@@ -71,29 +72,89 @@ class _EmploymentPageState extends ConsumerState<EmploymentPage> {
           DataPanel(
             value: snapshot == null ? current : AsyncData(snapshot),
             retry: refresh,
-            builder: (snapshot) => Column(
-              children: [
-                for (final event in snapshot.events.where(
-                  (event) => event.kind == _kind,
-                ))
-                  Card(
-                    child: ListTile(
-                      title: Text(event.title),
-                      subtitle: Text(
-                        [
-                          event.when,
-                          if (event.where.isNotEmpty) event.where,
-                        ].join('\n'),
-                      ),
-                      trailing: const Icon(Icons.open_in_new, size: 18),
-                      onTap: () =>
-                          openOfficialPage(context, event.url.toString()),
+            builder: (snapshot) {
+              final events = snapshot.events.where(
+                (event) => event.kind == _kind,
+              );
+              if (events.isEmpty) {
+                return StatePanel(
+                  '暂无${_kind.label}',
+                  '可打开学校就业信息网查看完整列表。',
+                  icon: Icons.event_outlined,
+                );
+              }
+              return Column(
+                children: [
+                  for (final event in events)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 10),
+                      child: _EmploymentEventCard(event: event),
                     ),
-                  ),
-              ],
-            ),
+                ],
+              );
+            },
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _EmploymentEventCard extends StatelessWidget {
+  const _EmploymentEventCard({required this.event});
+
+  final EmploymentEvent event;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colors = theme.colorScheme;
+    Widget detail(IconData icon, String label) => Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        ExcludeSemantics(child: Icon(icon, size: 16, color: colors.primary)),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(
+            label,
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: colors.onSurfaceVariant,
+            ),
+          ),
+        ),
+      ],
+    );
+    return Card(
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: () => openOfficialPage(context, event.url.toString()),
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(
+                    child: Text(
+                      event.title,
+                      style: theme.textTheme.titleMedium,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Icon(Icons.open_in_new, size: 18, color: colors.primary),
+                ],
+              ),
+              const SizedBox(height: 10),
+              detail(Icons.schedule_outlined, event.when),
+              if (event.where.isNotEmpty) ...[
+                const SizedBox(height: 6),
+                detail(Icons.location_on_outlined, event.where),
+              ],
+            ],
+          ),
+        ),
       ),
     );
   }

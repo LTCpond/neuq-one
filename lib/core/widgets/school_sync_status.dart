@@ -13,6 +13,7 @@ class SchoolSyncStatus extends StatelessWidget {
     required this.label,
     this.cacheError = false,
     this.reconnect,
+    this.compactSuccessLabel,
   });
 
   final bool available;
@@ -21,6 +22,7 @@ class SchoolSyncStatus extends StatelessWidget {
   final String label;
   final bool cacheError;
   final Widget? reconnect;
+  final String? compactSuccessLabel;
 
   @override
   Widget build(BuildContext context) {
@@ -43,16 +45,30 @@ class SchoolSyncStatus extends StatelessWidget {
         : refresh.isLoading
         ? (last == null ? '正在$label…' : '正在$label · 上次 $last')
         : (last == null ? '尚未$label' : '上次$label $last');
+    final style = Theme.of(context).textTheme.bodySmall
+        ?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant);
+    final compact = compactSuccessLabel != null;
+    if (compact &&
+        available &&
+        !refresh.isLoading &&
+        !refresh.hasError &&
+        !cacheError &&
+        last != null) {
+      return Tooltip(
+        message: status,
+        child: Text(compactSuccessLabel!, style: style),
+      );
+    }
     return Row(
       children: [
-        Icon(
-          available ? Icons.cloud_outlined : Icons.cloud_off_outlined,
-          size: 16,
-        ),
-        const SizedBox(width: 7),
-        Expanded(
-          child: Text(status, style: Theme.of(context).textTheme.bodySmall),
-        ),
+        if (!compact) ...[
+          Icon(
+            available ? Icons.cloud_outlined : Icons.cloud_off_outlined,
+            size: 16,
+          ),
+          const SizedBox(width: 7),
+        ],
+        Expanded(child: Text(status, style: style)),
         if (needsLogin) ?reconnect,
       ],
     );
