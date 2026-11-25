@@ -10,6 +10,7 @@ import '../features/mail/presentation/campus_mail_page.dart';
 import '../features/profile/data/course_reminders.dart';
 import '../features/profile/presentation/profile_page.dart';
 import '../features/services/presentation/campus_card_page.dart';
+import '../features/services/presentation/campus_map_page.dart';
 import '../features/services/presentation/classrooms_page.dart';
 import '../features/services/presentation/employment_page.dart';
 import '../features/services/presentation/school_policies_page.dart';
@@ -65,6 +66,11 @@ final routerProvider = Provider<GoRouter>((ref) {
                       GoRoute(
                         path: 'campus-card',
                         builder: (context, state) => const CampusCardPage(),
+                      ),
+                      GoRoute(
+                        path: 'campus-map',
+                        parentNavigatorKey: rootNavigator,
+                        builder: (context, state) => const CampusMapPage(),
                       ),
                       GoRoute(
                         path: 'employment',

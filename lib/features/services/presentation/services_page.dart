@@ -249,7 +249,7 @@ class _ServiceLink extends StatelessWidget {
           style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
         ),
         trailing: Icon(
-          service == schoolPoliciesService
+          service.route != null
               ? Icons.chevron_right_rounded
               : Icons.open_in_new,
           size: 13,

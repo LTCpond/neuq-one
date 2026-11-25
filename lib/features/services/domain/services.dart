@@ -47,11 +47,7 @@ const academicServices = [
     Icons.school_outlined,
     'https://jwxt.neuq.edu.cn/eams/localLogin.action',
   ),
-  CampusService.website(
-    '校园地图',
-    Icons.map_outlined,
-    'https://yx.neuq.edu.cn/shgl/xxdt.htm',
-  ),
+  CampusService.inApp('校园地图', Icons.map_outlined, '/services/campus-map'),
 ];
 
 const accessServices = [

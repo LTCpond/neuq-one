@@ -25,11 +25,13 @@ import 'package:neuq_one/features/mail/data/campus_mail.dart';
 import 'package:neuq_one/features/mail/presentation/campus_mail_page.dart';
 import 'package:neuq_one/features/profile/data/course_reminders.dart';
 import 'package:neuq_one/features/services/data/campus_card_balance.dart';
+import 'package:neuq_one/features/services/data/campus_map.dart';
 import 'package:neuq_one/features/services/data/classroom_cache.dart';
 import 'package:neuq_one/features/services/data/employment_feed.dart';
 import 'package:neuq_one/features/services/data/public_classrooms.dart';
 import 'package:neuq_one/features/services/data/school_policies.dart';
 import 'package:neuq_one/features/services/domain/school_policy.dart';
+import 'package:neuq_one/features/services/presentation/campus_map_page.dart';
 import 'package:neuq_one/features/services/presentation/classrooms_page.dart';
 import 'package:neuq_one/features/services/presentation/employment_page.dart';
 import 'package:neuq_one/features/timetable/data/local_timetable.dart';
@@ -559,6 +561,26 @@ void main() {
     },
   );
 
+  _appTest('campus map opens in the app and returns to services', (
+    tester,
+  ) async {
+    await _tab(tester, '服务');
+    final entry = find.text('校园地图');
+    await tester.ensureVisible(entry);
+    await tester.tap(entry);
+    await tester.pumpAndSettle();
+    final map = find.byType(CampusMapPage);
+    expect(map, findsOneWidget);
+    expect(
+      GoRouterState.of(tester.element(map)).matchedLocation,
+      '/services/campus-map',
+    );
+    expect(find.byType(NavigationBar), findsNothing);
+    await tester.tap(find.byType(BackButton));
+    await tester.pumpAndSettle();
+    expect(find.text('校园服务'), findsOneWidget);
+  });
+
   final policyBytes = utf8.encode('%PDF-1.7\n%%EOF');
   var policyReads = 0;
   _appTest(
@@ -969,6 +991,9 @@ void _appTest(
             ),
             publicDataClientProvider.overrideWithValue(
               PublicDataClient(classroomClient),
+            ),
+            campusMapProvider.overrideWith(
+              (ref) => Stream.error(const FormatException()),
             ),
             if (schoolPolicies != null)
               schoolPoliciesProvider.overrideWith(

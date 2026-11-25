@@ -8,6 +8,9 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.widget.Toast
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugins.webviewflutter.WebViewFlutterAndroidExternalApi
@@ -20,6 +23,18 @@ class MainActivity : FlutterActivity() {
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            "org.neuqone.neuq_one/campus_map"
+        ).setMethodCallHandler { call, result ->
+            val fullscreen = call.arguments as? Boolean
+            if (call.method == "setFullscreen" && fullscreen != null) {
+                setMapFullscreen(fullscreen)
+                result.success(null)
+            } else {
+                result.notImplemented()
+            }
+        }
         MethodChannel(
             flutterEngine.dartExecutor.binaryMessenger,
             "org.neuqone.neuq_one/campus_card_camera"
@@ -74,6 +89,18 @@ class MainActivity : FlutterActivity() {
                 "openWeChat" -> result.success(openWeChat())
                 else -> result.notImplemented()
             }
+        }
+    }
+
+    private fun setMapFullscreen(fullscreen: Boolean) {
+        val controller = WindowCompat.getInsetsController(window, window.decorView)
+        val bars = WindowInsetsCompat.Type.systemBars()
+        if (fullscreen) {
+            controller.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            controller.hide(bars)
+        } else {
+            controller.show(bars)
+            controller.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_DEFAULT
         }
     }
 

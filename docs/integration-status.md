@@ -6,11 +6,12 @@
 | 课表 | 使用已验证的教务会话读取当前学期个人课表和学期列表，按账号保存验证通过的快照 | 经教务认证且账号可查看本人课表。真机数据待验收 |
 | 成绩 | 每次进入读取本人历史成绩。学期 GPA 缺少时按入学年级办法计算 | 已收到 Android 真机成绩显示反馈。新版计算和显示待复验 |
 | 空教室 | 从 NEUQ One Data 读取北京时间七日快照，切换日期或楼栋时使用已加载数据。设备缓存保留完整时段状态与采集时间 | 公共 API 无需学校会话。迁移后的客户端待真机复验 |
+| 校园地图 | 从 NEUQ One Data 下载静态 PNG，在应用内缩放和全屏查看。使用设备文件缓存和 HTTP 条件请求 | 首次查看需要联网且地图已发布。下载成功后可离线查看 |
 | 学校政策 | 列出五份学校政策，在应用内预览并保存原文 PDF | 目录和 PDF 发布到 NEUQ One Data 后可联网读取。已缓存的目录和同版本原文可离线查看 |
 | 校园卡 | 打开页面或更新余额时，可用已有统一认证会话换取校园卡专用票据。余额按账号加密保存。校方充值页可跳转官方微信或支付宝收银台 | 校方要求额外验证时可在校园卡页完成。免重复登录和 App 内充值跳转待真机验证 |
 | 校园邮箱 | 使用 SSL/TLS 的 IMAP/SMTP 接入分校邮箱。在 App 内查看文件夹和邮件、搜索、收发及保存附件。客户端授权码按校内账号存入系统安全存储 | 在网页上启用 IMAP/SMTP 并生成客户端授权码 |
 | 就业活动 | 同步公开就业信息网首页的最新宣讲会和招聘会，缓存有效期 30 分钟，刷新失败时保留上次结果 | 浏览器可打开官方详情和完整列表 |
-| 校园网站 | 教务系统、一网通办、校园网、WebVPN、校园地图在系统浏览器打开 | 按各官方站点的访问和认证要求 |
+| 校园网站 | 教务系统、一网通办、校园网、WebVPN 在系统浏览器打开 | 按各官方站点的访问和认证要求 |
 
 ## 官方依据
 
@@ -23,7 +24,8 @@
 - [东北大学秦皇岛分校教学作息时间表](https://jwc.neuq.edu.cn/__local/7/A3/74/30B5B2E34A83B7421C3F9420A1B_C5316155_F1E8.pdf)提供 12 节上下课时间。
 - 教务学期缺少日期时使用对应学年的学校校历。[2024–2025 学年](https://jwc.neuq.edu.cn/__local/D/D9/F7/9CF57A987309D181E978B236AB9_FEC9E4A8_75240.pdf) · [2025–2026 学年](https://jwc.neuq.edu.cn/__local/0/54/97/9B9DDB54B6F8ECA0DF7EDA36F99_42399B7E_74D28.pdf) · [2026–2027 学年](https://jwc.neuq.edu.cn/info/1077/3582.htm)
 - [东秦教〔2025〕17 号](https://jwc.neuq.edu.cn/__local/8/D5/BA/B14A577547B0111B7BA1B241E2B_7DEA94A5_3523D.pdf)和[东秦教〔2019〕16 号](https://jwc.neuq.edu.cn/__local/B/41/42/D64F2600C48B924B4A9C4501BA8_BFEF2336_2FEF6.pdf)分别用于对应年级的本地绩点计算。
-- 网页入口来自[教务系统](https://jwxt.neuq.edu.cn/eams/localLogin.action)、[学校官网](https://www.neuq.edu.cn/)、[WebVPN](https://vpn.neuq.edu.cn/)和[迎新网学校地图](https://yx.neuq.edu.cn/shgl/xxdt.htm)。
+- 网页入口来自[教务系统](https://jwxt.neuq.edu.cn/eams/localLogin.action)、[学校官网](https://www.neuq.edu.cn/)和[WebVPN](https://vpn.neuq.edu.cn/)。
+- 校园地图的资源路径和发布流程见 Data 仓库。[静态资源与校园地图](https://github.com/LTCpond/neuq-one-data/blob/main/docs/static-assets.md)
 - [一网通办](https://eone.neuq.edu.cn/)的「推荐服务 → 校园卡」跳转到[校园卡网页](https://cardmobile.neuq.edu.cn/home/toHomePage)，未登录时由学校统一身份认证处理。[学校校园卡指南](https://xxhb.neuq.edu.cn/info/1018/2223.htm)
 - [校园邮箱入口](https://mail.neuq.edu.cn/)公布了加密邮件端口。[学生邮箱申请使用指南](https://xxhb.neuq.edu.cn/info/1018/1573.htm)列出了分校学生邮箱适用范围和开通方式。
 - [就业信息网](https://job.neuq.edu.cn/)公开发布[宣讲会](https://job.neuq.edu.cn/teachin/index)和[招聘会](https://job.neuq.edu.cn/jobfair)安排。
