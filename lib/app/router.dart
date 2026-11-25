@@ -12,6 +12,7 @@ import '../features/profile/presentation/profile_page.dart';
 import '../features/services/presentation/campus_card_page.dart';
 import '../features/services/presentation/classrooms_page.dart';
 import '../features/services/presentation/employment_page.dart';
+import '../features/services/presentation/school_policies_page.dart';
 import '../features/services/presentation/services_page.dart';
 import '../features/timetable/presentation/timetable_date.dart';
 import '../features/timetable/presentation/timetable_page.dart';
@@ -68,6 +69,11 @@ final routerProvider = Provider<GoRouter>((ref) {
                       GoRoute(
                         path: 'employment',
                         builder: (context, state) => const EmploymentPage(),
+                      ),
+                      GoRoute(
+                        path: 'policies',
+                        parentNavigatorKey: rootNavigator,
+                        builder: (context, state) => const SchoolPoliciesPage(),
                       ),
                       GoRoute(
                         path: 'mail',

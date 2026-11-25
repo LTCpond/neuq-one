@@ -1,7 +1,9 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:drift/native.dart';
+import 'package:flutter/services.dart' show MethodChannel, PlatformException;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -26,6 +28,8 @@ import 'package:neuq_one/features/services/data/campus_card_balance.dart';
 import 'package:neuq_one/features/services/data/classroom_cache.dart';
 import 'package:neuq_one/features/services/data/employment_feed.dart';
 import 'package:neuq_one/features/services/data/public_classrooms.dart';
+import 'package:neuq_one/features/services/data/school_policies.dart';
+import 'package:neuq_one/features/services/domain/school_policy.dart';
 import 'package:neuq_one/features/services/presentation/classrooms_page.dart';
 import 'package:neuq_one/features/services/presentation/employment_page.dart';
 import 'package:neuq_one/features/timetable/data/local_timetable.dart';
@@ -555,6 +559,72 @@ void main() {
     },
   );
 
+  final policyBytes = utf8.encode('%PDF-1.7\n%%EOF');
+  var policyReads = 0;
+  _appTest(
+    'school policies list documents directly and support retry and download',
+    (tester) async {
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        const MethodChannel('io.scer.pdf_renderer'),
+        (_) async => throw PlatformException(code: 'preview-unavailable'),
+      );
+      await _tab(tester, '服务');
+      final entry = find.text('学校政策');
+      await tester.scrollUntilVisible(entry, 120);
+      await tester.tap(entry);
+      await tester.pumpAndSettle();
+      expect(find.text('本科生学分绩点实施办法'), findsOneWidget);
+      expect(find.text('本研贯通培养实施办法'), findsOneWidget);
+
+      expect(find.byType(TextField), findsNothing);
+      await tester.tap(find.text('本科生学分绩点实施办法'));
+      await tester.pumpAndSettle();
+      expect(find.text('暂时无法读取政策文件'), findsOneWidget);
+      expect(
+        tester
+            .widget<IconButton>(
+              find.widgetWithIcon(IconButton, Icons.download_rounded),
+            )
+            .onPressed,
+        isNull,
+      );
+      await tester.tap(find.text('重试'));
+      await tester.pumpAndSettle();
+      expect(find.text('暂时无法预览，可下载 PDF 后打开。'), findsOneWidget);
+      await tester.tap(find.byTooltip('下载 PDF'));
+      await tester.pumpAndSettle();
+      expect(find.text('政策 PDF 已保存'), findsOneWidget);
+
+      await tester.tap(find.byType(BackButton));
+      await tester.pumpAndSettle();
+      expect(find.text('本科生学分绩点实施办法'), findsOneWidget);
+      expect(find.text('本研贯通培养实施办法'), findsOneWidget);
+    },
+    schoolPolicyPdf: (policy) async {
+      if (policyReads++ == 0) throw const FormatException();
+      return policyBytes;
+    },
+    schoolPolicySaver: (policy, bytes) async {
+      expect(policy.id, 'grade-point');
+      expect(bytes, policyBytes);
+      return true;
+    },
+    schoolPolicies: const [
+      SchoolPolicy(
+        id: 'grade-point',
+        title: '东北大学秦皇岛分校本科生学分绩点实施办法',
+        category: '学业成绩',
+        sha256: 'fixture',
+      ),
+      SchoolPolicy(
+        id: 'integrated-study',
+        title: '东北大学秦皇岛分校本研贯通培养实施办法',
+        category: '推免升学',
+        sha256: 'fixture',
+      ),
+    ],
+  );
+
   var classroomReads = 0;
   _appTest(
     'public classrooms switches seven dates and three buildings using one snapshot',
@@ -852,6 +922,9 @@ void _appTest(
   http.Response Function()? classroomResponse,
   DateTime Function()? classroomClock,
   DateTime Function()? timetableClock,
+  List<SchoolPolicy>? schoolPolicies,
+  Future<Uint8List> Function(SchoolPolicy)? schoolPolicyPdf,
+  SchoolPolicySaver? schoolPolicySaver,
   void Function()? onReminderSync,
   void Function(SchoolDataSet)? onRefresh,
 }) {
@@ -897,6 +970,16 @@ void _appTest(
             publicDataClientProvider.overrideWithValue(
               PublicDataClient(classroomClient),
             ),
+            if (schoolPolicies != null)
+              schoolPoliciesProvider.overrideWith(
+                (ref) => Stream.value(schoolPolicies),
+              ),
+            if (schoolPolicyPdf != null)
+              schoolPolicyPdfProvider.overrideWith(
+                (ref, policy) => schoolPolicyPdf(policy),
+              ),
+            if (schoolPolicySaver != null)
+              saveSchoolPolicyProvider.overrideWithValue(schoolPolicySaver),
             if (campusCardRepository != null)
               campusCardRepositoryProvider.overrideWithValue(
                 campusCardRepository,

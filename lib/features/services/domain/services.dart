@@ -35,6 +35,11 @@ const employmentService = CampusService.inApp(
   Icons.work_outline_rounded,
   '/services/employment',
 );
+const schoolPoliciesService = CampusService.inApp(
+  '学校政策',
+  Icons.description_outlined,
+  '/services/policies',
+);
 
 const academicServices = [
   CampusService.website(

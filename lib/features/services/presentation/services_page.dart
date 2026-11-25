@@ -135,7 +135,7 @@ class ServicesPage extends ConsumerWidget {
           const SizedBox(height: 8),
           const _ServicePair(accessServices),
           const SizedBox(height: 8),
-          const _ServiceLink(webVpnService),
+          const _ServicePair([webVpnService, schoolPoliciesService]),
           const SizedBox(height: 18),
           const CampusSectionHeading('就业'),
           const SizedBox(height: 8),
@@ -249,7 +249,9 @@ class _ServiceLink extends StatelessWidget {
           style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
         ),
         trailing: Icon(
-          Icons.open_in_new,
+          service == schoolPoliciesService
+              ? Icons.chevron_right_rounded
+              : Icons.open_in_new,
           size: 13,
           color: colors.onSurfaceVariant,
         ),
