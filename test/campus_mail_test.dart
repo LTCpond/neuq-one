@@ -23,7 +23,7 @@ void main() {
           isA<FormatException>().having(
             (error) => error.message,
             'message',
-            contains('本部学生邮箱地址'),
+            contains('东北大学学生邮箱地址'),
           ),
         ),
       );

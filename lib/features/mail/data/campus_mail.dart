@@ -72,7 +72,7 @@ class CampusMailRepository {
     final secret = code.trim();
     if (!_studentMailAddress.hasMatch(normalized)) {
       throw const FormatException(
-        '请输入完整的本部学生邮箱地址（@mails.neu.edu.cn 或 @stu.neu.edu.cn）',
+        '请输入完整的东北大学学生邮箱地址（@mails.neu.edu.cn 或 @stu.neu.edu.cn）',
       );
     }
     if (secret.length < 6 ||
@@ -171,14 +171,44 @@ class CampusMailRepository {
             : client.markUnflagged(sequence));
       });
 
-  Future<void> move(MailMessageId id, String target) => _read((client) async {
-    final folder = await _select(client, id);
-    if (folder.path == target) return;
-    final destination = client.mailboxes
-        ?.where((mailbox) => mailbox.path == target && !mailbox.isNotSelectable)
-        .firstOrNull;
-    if (destination == null) throw const FormatException('邮箱文件夹已变更，请刷新');
-    await client.moveMessages(_sequence(id), destination);
+  Future<void> move(MailMessageId id, String target) =>
+      moveMessages([id], target);
+
+  Future<void> moveMessages(Iterable<MailMessageId> ids, String target) =>
+      _read((client) async {
+        final messages = _sameFolder(ids);
+        if (messages.isEmpty) return;
+        final folder = await _select(client, messages.first);
+        if (folder.path == target) return;
+        final destination = client.mailboxes
+            ?.where(
+              (mailbox) => mailbox.path == target && !mailbox.isNotSelectable,
+            )
+            .firstOrNull;
+        if (destination == null) throw const FormatException('邮箱文件夹已变更，请刷新');
+        await client.moveMessages(_sequences(messages), destination);
+      });
+
+  /// Moves [ids] to the account trash folder.
+  ///
+  /// Messages that already are in a trash folder are removed permanently,
+  /// because the server would otherwise keep them in place.
+  Future<void> deleteMessages(
+    Iterable<MailMessageId> ids, {
+    bool forever = false,
+  }) => _read((client) async {
+    final messages = _sameFolder(ids);
+    if (messages.isEmpty) return;
+    final folder = await _select(client, messages.first);
+    final trash =
+        folder.isTrash ||
+        (await client.listMailboxes()).any(
+          (mailbox) => mailbox.path == folder.path && mailbox.isTrash,
+        );
+    await client.deleteMessages(
+      _sequences(messages),
+      expunge: forever || trash,
+    );
   });
 
   Future<bool> saveAttachment(
@@ -298,7 +328,7 @@ class CampusMailRepository {
   ) async {
     final client = MailClient(
       MailAccount.fromManualSettings(
-        name: '东北大学本部学生邮箱',
+        name: '东北大学学生邮箱',
         email: credentials.address,
         password: credentials.code,
         incomingHost: _mailServer,
@@ -360,6 +390,24 @@ Future<Mailbox> _select(MailClient client, MailMessageId id) async {
 
 MessageSequence _sequence(MailMessageId id) =>
     MessageSequence.fromId(id.uid, isUid: true);
+
+/// Guards batch operations: UIDs are only meaningful inside one folder
+/// snapshot, so mixed or stale selections are rejected instead of moving the
+/// wrong messages.
+List<MailMessageId> _sameFolder(Iterable<MailMessageId> ids) {
+  final messages = ids.toList(growable: false);
+  if (messages.isEmpty) return messages;
+  final first = messages.first;
+  if (messages.any(
+    (id) => id.folder != first.folder || id.validity != first.validity,
+  )) {
+    throw const FormatException('邮件列表已变化，请刷新后重试');
+  }
+  return messages;
+}
+
+MessageSequence _sequences(List<MailMessageId> ids) =>
+    MessageSequence.fromIds([for (final id in ids) id.uid], isUid: true);
 
 Future<MimeMessage> _message(MailClient client, MailMessageId id) async {
   final items = await client.fetchMessageSequence(
