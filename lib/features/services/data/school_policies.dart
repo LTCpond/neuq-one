@@ -76,6 +76,7 @@ class SchoolPolicyRepository {
     try {
       final response = await _client.getBytes(
         '$_root/$_index',
+        source: PublicDataSource.assets,
         accept: 'application/json',
         revalidate: true,
         maxBytes: _maxIndexBytes,
@@ -99,6 +100,7 @@ class SchoolPolicyRepository {
 
     final response = await _client.getBytes(
       '$_root/$name',
+      source: PublicDataSource.assets,
       accept: 'application/pdf',
       revalidate: true,
       maxBytes: _maxPdfBytes,

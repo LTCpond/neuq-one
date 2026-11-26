@@ -5,7 +5,20 @@ import 'dart:typed_data';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http/http.dart' as http;
 
-final publicDataRoot = Uri.https('neuq-one-data.pages.dev');
+final publicDataRoot = Uri.parse(
+  const String.fromEnvironment(
+    'NEUQ_ONE_DATA_ORIGIN',
+    defaultValue: 'https://neuq-one-data.pages.dev',
+  ),
+);
+final publicAssetsRoot = Uri.parse(
+  const String.fromEnvironment(
+    'NEUQ_ONE_ASSETS_ORIGIN',
+    defaultValue: 'https://neuq-one-assets.pages.dev',
+  ),
+);
+
+enum PublicDataSource { data, assets }
 
 final publicDataClientProvider = Provider<PublicDataClient>((ref) {
   final client = http.Client();
@@ -17,30 +30,39 @@ typedef PublicDataResponse = ({String? body, Map<String, String> headers});
 typedef PublicDataBytes = ({Uint8List? body, Map<String, String> headers});
 
 class PublicDataClient {
-  const PublicDataClient(this._client);
+  PublicDataClient(this._client, {Uri? dataOrigin, Uri? assetsOrigin})
+    : dataOrigin = dataOrigin ?? publicDataRoot,
+      assetsOrigin = assetsOrigin ?? publicAssetsRoot;
 
   final http.Client _client;
+  final Uri dataOrigin;
+  final Uri assetsOrigin;
   static const _timeout = Duration(seconds: 12);
   static const _maxBytes = 8 * 1024 * 1024;
 
   Future<PublicDataResponse> getJson(
     String path, {
+    required PublicDataSource source,
     String? etag,
     String? lastModified,
     bool revalidate = false,
+    int maxBytes = _maxBytes,
   }) async {
     final (body: body, headers: headers) = await getBytes(
       path,
+      source: source,
       accept: 'application/json',
       etag: etag,
       lastModified: lastModified,
       revalidate: revalidate,
+      maxBytes: maxBytes,
     );
     return (body: body == null ? null : utf8.decode(body), headers: headers);
   }
 
   Future<PublicDataBytes> getBytes(
     String path, {
+    required PublicDataSource source,
     required String accept,
     String? etag,
     String? lastModified,
@@ -48,10 +70,14 @@ class PublicDataClient {
     Duration timeout = _timeout,
     int maxBytes = _maxBytes,
   }) async {
+    final origin = switch (source) {
+      PublicDataSource.data => dataOrigin,
+      PublicDataSource.assets => assetsOrigin,
+    };
     final abort = Completer<void>();
     final request = http.AbortableRequest(
       'GET',
-      publicDataRoot.replace(path: path),
+      origin.replace(path: path),
       abortTrigger: abort.future,
     )..followRedirects = false;
     request.headers.addAll({

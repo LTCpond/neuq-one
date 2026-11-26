@@ -64,11 +64,12 @@ class CampusMapRepository {
       final isPng = _isPng(bytes);
       if (!isPng && !_isLegacyWebP(bytes)) return null;
       await _validateImage(bytes);
-      // Validators for the old WebP URL do not apply to the PNG resource.
+      final sameResource =
+          isPng && header['origin'] == _client.assetsOrigin.origin;
       return CampusMap(
         bytes,
-        etag: isPng ? header['etag'] as String? : null,
-        lastModified: isPng ? header['lastModified'] as String? : null,
+        etag: sameResource ? header['etag'] as String? : null,
+        lastModified: sameResource ? header['lastModified'] as String? : null,
       );
     } catch (_) {
       // An unreadable cache falls back to an unconditional download.
@@ -82,6 +83,7 @@ class CampusMapRepository {
   Future<CampusMap> _refresh(CampusMap? cached) async {
     final response = await _client.getBytes(
       _path,
+      source: PublicDataSource.assets,
       accept: 'image/png',
       etag: cached?.etag,
       lastModified: cached?.lastModified,
@@ -111,9 +113,12 @@ class CampusMapRepository {
   }
 
   Future<void> _write(CampusMap map) async {
-    final metadata = utf8.encode(
-      '${jsonEncode({'etag': map.etag, 'lastModified': map.lastModified})}\n',
-    );
+    final header = {
+      'origin': _client.assetsOrigin.origin,
+      'etag': map.etag,
+      'lastModified': map.lastModified,
+    };
+    final metadata = utf8.encode('${jsonEncode(header)}\n');
     if (metadata.length > _maxHeaderBytes) return;
     final directory = await _directory();
     await directory.create(recursive: true);

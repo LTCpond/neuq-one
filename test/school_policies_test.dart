@@ -42,7 +42,7 @@ void main() {
 
   test('catalog and PDF remain readable after the public host fails', () async {
     final online = repository((request) async {
-      expect(request.url.origin, publicDataRoot.origin);
+      expect(request.url.origin, publicAssetsRoot.origin);
       return switch (request.url.path) {
         '/assets/policies/index.json' => http.Response(
           catalog(pdf),

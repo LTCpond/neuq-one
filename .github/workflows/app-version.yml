@@ -1,0 +1,23 @@
+name: Update app version manifest
+
+on:
+  release:
+    types: [published]
+
+permissions: {}
+
+jobs:
+  dispatch:
+    if: github.repository == 'LTCpond/neuq-one' && !github.event.release.prerelease && !github.event.release.draft
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Dispatch static assets deployment
+        env:
+          GH_TOKEN: ${{ secrets.NEUQ_ASSETS_DISPATCH_TOKEN }}
+        run: |
+          if [[ -z "$GH_TOKEN" ]]; then
+            echo '请配置 NEUQ_ASSETS_DISPATCH_TOKEN'
+            exit 1
+          fi
+          gh workflow run assets.yml --repo LTCpond/neuq-one-data --ref main

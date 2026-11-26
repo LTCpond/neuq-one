@@ -9,6 +9,7 @@ import '../../../core/storage/settings.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/widgets/campus_components.dart';
 import '../../../core/widgets/screen.dart';
+import '../data/app_updates.dart';
 import '../data/course_reminders.dart';
 
 const _repositoryUrl = String.fromEnvironment(
@@ -42,6 +43,36 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
       if (mounted) setState(() => _busy = false);
     }
   }
+
+  Future<void> _checkForUpdate() => _run(() async {
+    final AppRelease? release;
+    try {
+      release = await ref.read(appUpdatesProvider).checkForUpdate();
+    } catch (_) {
+      return '检查更新失败，请稍后重试';
+    }
+    if (!mounted) return null;
+    if (release == null) return '暂无可用更新';
+    final (:version, :url) = release;
+    final open = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('发现新版本 $version'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('关闭'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('查看 GitHub 发布'),
+          ),
+        ],
+      ),
+    );
+    if (open == true && mounted) await openOfficialPage(context, url);
+    return null;
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -225,6 +256,7 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
                   onTap: () => _showInfo(
                     '关于 NEUQ One',
                     'NEUQ One 是面向东北大学秦皇岛分校学生的非官方开源校园工作台。学校的正式通知、成绩和业务办理以官方系统为准。',
+                    checkForUpdate: !_busy,
                   ),
                 ),
                 const SizedBox(height: 6),
@@ -256,20 +288,32 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
     );
   }
 
-  Future<void> _showInfo(String title, String content) => showDialog<void>(
-    context: context,
-    builder: (context) => AlertDialog(
-      scrollable: true,
-      title: Text(title),
-      content: Text(content),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(context),
-          child: const Text('关闭'),
-        ),
-      ],
-    ),
-  );
+  Future<void> _showInfo(
+    String title,
+    String content, {
+    bool checkForUpdate = false,
+  }) async {
+    final check = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        scrollable: true,
+        title: Text(title),
+        content: Text(content),
+        actions: [
+          if (checkForUpdate)
+            TextButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('检查更新'),
+            ),
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('关闭'),
+          ),
+        ],
+      ),
+    );
+    if (check == true && mounted) await _checkForUpdate();
+  }
 }
 
 String _themeLabel(ThemeMode theme) => switch (theme) {

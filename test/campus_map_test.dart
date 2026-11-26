@@ -47,7 +47,7 @@ void main() {
       final disk = repository((request) async {
         expect(
           request.url,
-          publicDataRoot.resolve('/assets/maps/campus-map.png'),
+          publicAssetsRoot.resolve('/assets/maps/campus-map.png'),
         );
         expect(request.headers['accept'], 'image/png');
         expect(request.headers['cache-control'], 'no-cache');
@@ -65,6 +65,36 @@ void main() {
       final stored = (await reopened.readCached())!;
       expect(stored.bytes, _firstMap);
       expect(await reopened.refresh(stored), same(stored));
+    },
+  );
+
+  test(
+    'keeps the old-site PNG offline and revalidates from the new origin',
+    () async {
+      var online = false;
+      final disk = repository((request) async {
+        expect(request.url.origin, publicAssetsRoot.origin);
+        expect(request.headers['if-none-match'], isNull);
+        expect(request.headers['if-modified-since'], isNull);
+        if (!online) throw const SocketException('offline');
+        return _ok(_updatedMap, '"new"');
+      });
+      final cache = File.fromUri(
+        directory.uri.resolve('neuq_one_campus_map.cache'),
+      );
+      await cache.writeAsBytes([
+        ...utf8.encode(
+          '${jsonEncode({'etag': '"old"', 'lastModified': _modified})}\n',
+        ),
+        ..._firstMap,
+      ]);
+      expect((await disk.load().single).bytes, _firstMap);
+      online = true;
+      expect(await disk.load().map((map) => map.bytes).toList(), [
+        _firstMap,
+        _updatedMap,
+      ]);
+      expect((await disk.readCached())!.etag, '"new"');
     },
   );
 

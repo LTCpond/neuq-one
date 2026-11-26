@@ -119,6 +119,7 @@ class Classrooms extends Notifier<ClassroomsState> {
           .read(publicDataClientProvider)
           .getJson(
             _path,
+            source: PublicDataSource.data,
             etag: _cached?.etag,
             lastModified: _cached?.lastModified,
             revalidate: revalidate,

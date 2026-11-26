@@ -14,5 +14,17 @@ import UserNotifications
 
   func didInitializeImplicitFlutterEngine(_ engineBridge: FlutterImplicitEngineBridge) {
     GeneratedPluginRegistrant.register(with: engineBridge.pluginRegistry)
+    let appVersion = FlutterMethodChannel(
+      name: "org.neuqone.neuq_one/app_version",
+      binaryMessenger: engineBridge.applicationRegistrar.messenger()
+    )
+    appVersion.setMethodCallHandler { call, result in
+      switch call.method {
+      case "getVersion":
+        result(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString"))
+      default:
+        result(FlutterMethodNotImplemented)
+      }
+    }
   }
 }
