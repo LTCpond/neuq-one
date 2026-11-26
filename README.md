@@ -49,7 +49,7 @@ flutter build apk --debug
 
 输出：`build/app/outputs/flutter-apk/app-debug.apk`。GitHub Actions 也会在检查通过后生成 `neuq-one-debug` 构建产物，可从仓库的 [Actions](https://github.com/LTCpond/neuq-one/actions) 下载。
 
-当前构建配置用于开发和测试，包括 release 构建所用的调试签名。需要正式分发时，请配置自己的发布签名；私钥和签名密码不应提交到仓库。
+本地 Release 构建需要正式签名配置。推送与 `pubspec.yaml` 版本匹配的 `vMAJOR.MINOR.PATCH` 标签后，GitHub Actions 会构建并验证三个 ABI 的正式 APK，发布为 Latest，并触发版本清单更新。[Android 签名配置](docs/android-signing.md) · [部署与正式发布](docs/deployment.md)
 
 个人中心的 GitHub 入口默认指向本仓库。派生项目可以覆盖：
 
@@ -57,7 +57,7 @@ flutter build apk --debug
 flutter build apk --debug --dart-define=NEUQ_ONE_REPOSITORY_URL=https://github.com/your-account/your-repo
 ```
 
-空教室从 `https://neuq-one-data.pages.dev` 读取。地图、政策和 App 版本清单从 `https://neuq-one-assets.pages.dev` 读取。构建时可分别用 `NEUQ_ONE_DATA_ORIGIN` 和 `NEUQ_ONE_ASSETS_ORIGIN` 覆盖根地址。正式 Android 安装包通过 GitHub Releases 分发。[公共数据接口](docs/public-data.md) · [部署与正式发布](docs/deployment.md)
+空教室从 `https://neuq-one-data.pages.dev` 读取。地图、政策和 App 版本清单从 `https://neuq-one-assets.pages.dev` 读取。构建时可分别用 `NEUQ_ONE_DATA_ORIGIN` 和 `NEUQ_ONE_ASSETS_ORIGIN` 覆盖根地址。请按设备架构下载正式 Android 安装包，常见的 64 位 ARM 手机使用 `arm64-v8a`。[公共数据接口](docs/public-data.md) · [GitHub Releases](https://github.com/LTCpond/neuq-one/releases)
 
 ## 开发与验证
 

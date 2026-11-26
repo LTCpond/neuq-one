@@ -1,0 +1,123 @@
+name: Android Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions: {}
+
+concurrency:
+  group: android-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    if: github.repository == 'LTCpond/neuq-one' && !github.event.deleted
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: Validate the Git tag against pubspec.yaml
+        shell: bash
+        run: |
+          version=$(ruby -ryaml -e 'print YAML.safe_load_file("pubspec.yaml").fetch("version")')
+          if [[ ! "$version" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(\+[0-9]+)?$ ||
+                "$GITHUB_REF_NAME" != "v${version%%+*}" ]]; then
+            echo 'Git 标签必须为 vMAJOR.MINOR.PATCH，并与 pubspec.yaml 的版本号一致。'
+            exit 1
+          fi
+      - uses: ./.github/actions/verify-android
+        id: verify-android
+      - name: Build and verify signed APKs by ABI
+        shell: bash
+        env:
+          APKSIGNER: ${{ steps.verify-android.outputs.apksigner }}
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          for secret in ANDROID_KEYSTORE_BASE64 ANDROID_KEYSTORE_PASSWORD ANDROID_KEY_ALIAS ANDROID_KEY_PASSWORD; do
+            if [[ -z "${!secret}" ]]; then
+              echo "请配置 GitHub Actions Secret $secret"
+              exit 1
+            fi
+          done
+
+          umask 077
+          export RELEASE_KEYSTORE_PATH
+          RELEASE_KEYSTORE_PATH=$(mktemp "$RUNNER_TEMP/neuq-one-release.XXXXXX")
+          trap 'rm -f -- "$RELEASE_KEYSTORE_PATH" android/key.properties' EXIT
+          python3 - <<'PY'
+          import base64
+          import os
+          from pathlib import Path
+
+          keystore = Path(os.environ["RELEASE_KEYSTORE_PATH"])
+          keystore.write_bytes(base64.b64decode("".join(os.environ["ANDROID_KEYSTORE_BASE64"].split()), validate=True))
+          properties = {
+              "storeFile": str(keystore),
+              "storePassword": os.environ["ANDROID_KEYSTORE_PASSWORD"],
+              "keyAlias": os.environ["ANDROID_KEY_ALIAS"],
+              "keyPassword": os.environ["ANDROID_KEY_PASSWORD"],
+          }
+          escapes = str.maketrans({"\\": r"\\", " ": r"\ ", "\n": r"\n", "\r": r"\r", "\t": r"\t", "\f": r"\f"})
+          Path("android/key.properties").write_text(
+              "".join(f"{key}={value.translate(escapes)}\n" for key, value in properties.items()),
+              encoding="utf-8",
+          )
+          PY
+
+          expected_digest=$(keytool -exportcert -keystore "$RELEASE_KEYSTORE_PATH" \
+            -alias "$ANDROID_KEY_ALIAS" -storepass:env ANDROID_KEYSTORE_PASSWORD | sha256sum | cut -d ' ' -f 1)
+          unset ANDROID_KEYSTORE_BASE64 ANDROID_KEYSTORE_PASSWORD ANDROID_KEY_ALIAS ANDROID_KEY_PASSWORD
+
+          flutter build apk --release --split-per-abi --no-pub \
+            --dart-define="NEUQ_ONE_REPOSITORY_URL=https://github.com/$GITHUB_REPOSITORY"
+
+          mkdir -p release-apks
+          for abi in armeabi-v7a arm64-v8a x86_64; do
+            apk="build/app/outputs/flutter-apk/app-$abi-release.apk"
+            certificates=$("$APKSIGNER" verify --print-certs "$apk")
+            actual_digest=$(awk -F ': ' '/^Signer #[0-9]+ certificate SHA-256 digest:/ { print $2 }' <<< "$certificates")
+            if [[ "$actual_digest" != "$expected_digest" || "$certificates" == *'CN=Android Debug'* ]]; then
+              echo "$abi APK 的签名与正式发布证书不符。"
+              exit 1
+            fi
+            cp "$apk" "release-apks/neuq-one-$GITHUB_REF_NAME-$abi.apk"
+          done
+      - uses: actions/upload-artifact@v6
+        with:
+          name: release-apks
+          path: release-apks/*.apk
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v7
+        with:
+          name: release-apks
+          path: release-apks
+      - name: Publish APKs and generated release notes
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" release-apks/*.apk \
+            --repo "$GITHUB_REPOSITORY" --verify-tag --generate-notes --latest
+
+  update-version-manifest:
+    needs: publish
+    uses: ./.github/workflows/app-version.yml
+    secrets:
+      NEUQ_ASSETS_DISPATCH_TOKEN: ${{ secrets.NEUQ_ASSETS_DISPATCH_TOKEN }}

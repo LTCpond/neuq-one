@@ -1,0 +1,55 @@
+name: Verify Flutter Android
+description: Set up the shared Flutter and Android toolchain and check the source.
+
+outputs:
+  apksigner:
+    description: Path to apksigner from the configured Android Build Tools.
+    value: ${{ steps.sdk-packages.outputs.apksigner }}
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-java@v5
+      with:
+        distribution: temurin
+        java-version: '17'
+    - uses: subosito/flutter-action@v2
+      with:
+        flutter-version: '3.50.1'
+        channel: stable
+        cache: true
+    - name: Resolve locked dependencies
+      shell: bash
+      run: flutter pub get --enforce-lockfile
+    - name: Check generated sources
+      shell: bash
+      run: |
+        dart run build_runner build
+        git diff --exit-code -- lib
+    - name: Check Dart formatting
+      shell: bash
+      run: dart format --output=none --set-exit-if-changed lib test
+    - name: Analyze
+      shell: bash
+      run: flutter analyze --no-pub
+    - name: Run tests
+      shell: bash
+      run: flutter test --no-pub
+
+    - name: Setup Android SDK
+      uses: android-actions/setup-android@v4
+      with:
+        cmdline-tools-version: '15859902'
+    - name: Install Android SDK packages
+      id: sdk-packages
+      shell: bash
+      env:
+        ANDROID_BUILD_TOOLS_VERSION: '36.0.0'
+      run: |
+        sdkmanager "platforms;android-35" \
+          "platforms;android-36" \
+          "platforms;android-37.0" \
+          "build-tools;$ANDROID_BUILD_TOOLS_VERSION" \
+          "ndk;28.2.13676358" \
+          "cmake;3.22.1"
+        echo "apksigner=$ANDROID_HOME/build-tools/$ANDROID_BUILD_TOOLS_VERSION/apksigner" >> "$GITHUB_OUTPUT"

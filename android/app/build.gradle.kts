@@ -1,8 +1,24 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id("dev.flutter.flutter-gradle-plugin")
 }
+
+val releaseSigning = Properties().apply {
+    val propertiesFile = rootProject.file("key.properties")
+    if (propertiesFile.isFile) {
+        propertiesFile.reader(Charsets.UTF_8).use { load(it) }
+    }
+}
+val releaseKeystore = releaseSigning.getProperty("storeFile")
+    ?.takeIf { it.isNotBlank() }
+    ?.let { rootProject.file(it) }
+val hasReleaseSigning = releaseKeystore?.isFile == true &&
+    listOf("storePassword", "keyAlias", "keyPassword").all {
+        !releaseSigning.getProperty(it).isNullOrBlank()
+    }
 
 android {
     namespace = "org.neuqone.neuq_one"
@@ -27,12 +43,32 @@ android {
         versionName = flutter.versionName
     }
 
-    buildTypes {
-        release {
-            // Local development only. Distribution builds need a private release key.
-            signingConfig = signingConfigs.getByName("debug")
+    signingConfigs {
+        create("release") {
+            storeFile = releaseKeystore
+            storePassword = releaseSigning.getProperty("storePassword")
+            keyAlias = releaseSigning.getProperty("keyAlias")
+            keyPassword = releaseSigning.getProperty("keyPassword")
         }
     }
+
+    buildTypes {
+        release {
+            signingConfig = signingConfigs.getByName("release")
+        }
+    }
+}
+
+val checkReleaseSigning by tasks.registering {
+    doLast {
+        check(hasReleaseSigning) {
+            "Android Release 构建需要有效的 android/key.properties 和正式签名密钥。请参阅 docs/android-signing.md。"
+        }
+    }
+}
+
+tasks.matching { it.name == "preReleaseBuild" }.configureEach {
+    dependsOn(checkReleaseSigning)
 }
 
 dependencies {
