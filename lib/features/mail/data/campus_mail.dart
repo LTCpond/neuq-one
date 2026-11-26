@@ -12,10 +12,14 @@ import 'package:html/parser.dart' as html;
 
 import '../../../core/auth/school_auth.dart';
 
-const campusMailWebsite = 'https://mail.neuq.edu.cn/';
+const campusMailWebsite = 'https://mails.neu.edu.cn/';
+const _mailServer = 'uni-edu.icoremail.net';
 const _mailLimit = 15 * 1024 * 1024;
 const _pageSize = 25;
 const _responseTimeout = Duration(seconds: 20);
+final _studentMailAddress = RegExp(
+  r'^[a-z0-9][a-z0-9._+-]{0,63}@(mails|stu)\.neu\.edu\.cn$',
+);
 
 final campusMailProvider = Provider<CampusMailRepository?>((ref) {
   final subject = ref.watch(
@@ -63,15 +67,15 @@ class CampusMailRepository {
   Future<void> connect(String address, String code) async {
     final normalized = address.trim().toLowerCase();
     final secret = code.trim();
-    if (!RegExp(
-      r'^[a-z0-9][a-z0-9._+-]{0,63}@(stu\.neuq\.edu\.cn|neuq\.edu\.cn|qhd\.neu\.edu\.cn)$',
-    ).hasMatch(normalized)) {
-      throw const FormatException('请输入完整的校园邮箱地址');
+    if (!_studentMailAddress.hasMatch(normalized)) {
+      throw const FormatException(
+        '请输入完整的本部学生邮箱地址（@mails.neu.edu.cn 或 @stu.neu.edu.cn）',
+      );
     }
     if (secret.length < 6 ||
         secret.length > 128 ||
         RegExp(r'\s').hasMatch(secret)) {
-      throw const FormatException('请输入邮箱网页生成的客户端授权码');
+      throw const FormatException('请输入邮箱网页生成的客户端专用密码');
     }
     await _open((address: normalized, code: secret), (client) async {
       await client.selectInbox();
@@ -278,7 +282,9 @@ class CampusMailRepository {
     final value = await _storage.read(key: _key);
     if (value == null) return null;
     final fields = jsonDecode(value) as List<dynamic>;
-    return (address: fields[0] as String, code: fields[1] as String);
+    final address = fields[0] as String;
+    if (!_studentMailAddress.hasMatch(address)) return null;
+    return (address: address, code: fields[1] as String);
   }
 
   Future<T> _open<T>(
@@ -287,13 +293,12 @@ class CampusMailRepository {
   ) async {
     final client = MailClient(
       MailAccount.fromManualSettings(
-        name: '校园邮箱',
+        name: '东北大学本部学生邮箱',
         email: credentials.address,
         password: credentials.code,
-        incomingHost: 'imap.neuq.edu.cn',
-        outgoingHost: 'smtp.neuq.edu.cn',
-        outgoingPort: 994,
-        outgoingClientDomain: 'neuq.edu.cn',
+        incomingHost: _mailServer,
+        outgoingHost: _mailServer,
+        outgoingClientDomain: 'mails.neu.edu.cn',
       ),
       clientId: const Id(name: 'NEUQ One'),
       defaultResponseTimeout: _responseTimeout,

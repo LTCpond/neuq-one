@@ -10,7 +10,7 @@
 | 学校政策 | 从 NEUQ One Assets 读取政策目录，在应用内预览并保存原文 PDF | 已缓存的目录和同版本原文可离线查看 |
 | App 检查更新 | 从 NEUQ One Assets 读取正式版本清单，比对已安装包的版本 | 需要联网，发现新版本时可打开 GitHub Release 页面 |
 | 校园卡 | 打开页面或更新余额时，可用已有统一认证会话换取校园卡专用票据。余额按账号加密保存。校方充值页可跳转官方微信或支付宝收银台 | 校方要求额外验证时可在校园卡页完成。免重复登录和 App 内充值跳转待真机验证 |
-| 校园邮箱 | 使用 SSL/TLS 的 IMAP/SMTP 接入分校邮箱。在 App 内查看文件夹和邮件、搜索、收发及保存附件。客户端授权码按校内账号存入系统安全存储 | 在网页上启用 IMAP/SMTP 并生成客户端授权码 |
+| 校园邮箱 | 使用 TLS 加密的 IMAP/SMTP 接入东北大学本部学生邮箱。在 App 内查看文件夹和邮件、搜索、收发及保存附件。客户端专用密码按校内账号存入系统安全存储 | 在本部邮箱网页启用 IMAP/SMTP 并生成客户端专用密码 |
 | 就业活动 | 同步公开就业信息网首页的最新宣讲会和招聘会，缓存有效期 30 分钟，刷新失败时保留上次结果 | 浏览器可打开官方详情和完整列表 |
 | 校园网站 | 教务系统、一网通办、校园网、WebVPN 在系统浏览器打开 | 按各官方站点的访问和认证要求 |
 
@@ -28,7 +28,8 @@
 - 网页入口来自[教务系统](https://jwxt.neuq.edu.cn/eams/localLogin.action)、[学校官网](https://www.neuq.edu.cn/)和[WebVPN](https://vpn.neuq.edu.cn/)。
 - 校园地图的资源路径和发布流程见 Data 仓库。[静态资源与校园地图](https://github.com/LTCpond/neuq-one-data/blob/main/docs/static-assets.md)
 - [一网通办](https://eone.neuq.edu.cn/)的「推荐服务 → 校园卡」跳转到[校园卡网页](https://cardmobile.neuq.edu.cn/home/toHomePage)，未登录时由学校统一身份认证处理。[学校校园卡指南](https://xxhb.neuq.edu.cn/info/1018/2223.htm)
-- [校园邮箱入口](https://mail.neuq.edu.cn/)公布了加密邮件端口。[学生邮箱申请使用指南](https://xxhb.neuq.edu.cn/info/1018/1573.htm)列出了分校学生邮箱适用范围和开通方式。
+- 本部学生邮箱使用 `@mails.neu.edu.cn`，迁移上云前开通的账号继续使用 `@stu.neu.edu.cn`。[学生邮箱注册和登录指南](https://xwb.neu.edu.cn/10178/list.htm)
+- 校园邮箱在系统浏览器打开官方入口。App 内收发使用 Coremail 云邮箱的 `uni-edu.icoremail.net`，通过 TLS 连接 IMAP 993 和 SMTP 465。已验证两项服务的 TLS 握手和协议响应，真实账号收发待验收。[本部学生邮箱](https://mails.neu.edu.cn/) · [Coremail 客户端配置指南](https://support.coremail.cn/Q-11/100003.html)
 - [就业信息网](https://job.neuq.edu.cn/)公开发布[宣讲会](https://job.neuq.edu.cn/teachin/index)和[招聘会](https://job.neuq.edu.cn/jobfair)安排。
 - 校园卡 WebView 从学校页面进入支付服务的 HTTPS 收银台，由校方和支付平台处理订单及付款确认。Android 将收银台发出的唤起链接交给对应客户端。[微信 H5 支付指引](https://pay.wechatpay.cn/doc/v3/partner/4012085683) · [支付宝唤起链接说明](https://aipay.alipay.com/docs/vibe-pay/nowpay/direct/api-list/purchase_create.html)
 

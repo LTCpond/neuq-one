@@ -113,11 +113,17 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          release_flags=(--latest)
+          if [[ "$GITHUB_REF_NAME" == 'v0.1.0' ]]; then
+            release_flags=(--prerelease --latest=false --title "$GITHUB_REF_NAME 公测版"
+              --notes 'NEUQ One 首个 Android 公测版，提供课表、成绩、空教室、校园地图、学校政策和校园邮箱等功能。常见 Android 手机请选择 arm64-v8a 安装包。')
+          fi
           gh release create "$GITHUB_REF_NAME" release-apks/*.apk \
-            --repo "$GITHUB_REPOSITORY" --verify-tag --generate-notes --latest
+            --repo "$GITHUB_REPOSITORY" --verify-tag --generate-notes "${release_flags[@]}"
 
   update-version-manifest:
     needs: publish
+    if: github.ref_name != 'v0.1.0'
     uses: ./.github/workflows/app-version.yml
     secrets:
       NEUQ_ASSETS_DISPATCH_TOKEN: ${{ secrets.NEUQ_ASSETS_DISPATCH_TOKEN }}

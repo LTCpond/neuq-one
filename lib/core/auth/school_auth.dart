@@ -252,13 +252,8 @@ class SchoolSessionController extends AsyncNotifier<SchoolSession?> {
   }
 
   Future<void> disconnect() async {
-    final repository = ref.read(schoolAuthRepositoryProvider);
-    state = const AsyncLoading();
-    try {
-      await repository.disconnect();
-    } finally {
-      state = const AsyncData(null);
-    }
+    await ref.read(schoolAuthRepositoryProvider).disconnect();
+    if (ref.mounted) state = const AsyncData(null);
   }
 }
 

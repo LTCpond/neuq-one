@@ -81,7 +81,7 @@ class ServicesPage extends ConsumerWidget {
                       right: 5,
                       bottom: 5,
                     ),
-                    subtitle: '收发与查看邮件',
+                    subtitle: '本部学生邮箱',
                     secondary: Color(0xFFDCE7FF),
                   ),
                   const SizedBox(height: 10),

@@ -212,6 +212,10 @@ void main() {
 
       await newRepository.forgetPassword(_subject);
       expect(await newRepository.hasRememberedPassword(_subject), isFalse);
+      final stored = await const FlutterSecureStorage().read(
+        key: 'neuqSchoolLogin',
+      );
+      expect(jsonDecode(stored!), {'subject': _subject});
       expect((await newRepository.restoreSession())?.subject, _subject);
       school.expire();
       await expectLater(

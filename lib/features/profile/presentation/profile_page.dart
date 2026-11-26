@@ -28,6 +28,7 @@ class ProfilePage extends ConsumerStatefulWidget {
 
 class _ProfilePageState extends ConsumerState<ProfilePage> {
   bool _busy = false;
+  bool _checkingForUpdate = false;
 
   Future<void> _run(Future<String?> Function() operation) async {
     if (_busy) return;
@@ -44,42 +45,67 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
     }
   }
 
-  Future<void> _checkForUpdate() => _run(() async {
-    final AppRelease? release;
-    try {
-      release = await ref.read(appUpdatesProvider).checkForUpdate();
-    } catch (_) {
-      return '检查更新失败，请稍后重试';
-    }
-    if (!mounted) return null;
-    if (release == null) return '暂无可用更新';
-    final (:version, :url) = release;
-    final open = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text('发现新版本 $version'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('关闭'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('查看 GitHub 发布'),
-          ),
-        ],
-      ),
-    );
-    if (open == true && mounted) await openOfficialPage(context, url);
-    return null;
+  Future<void> _forgetCredentials() => _run(() async {
+    final subject = ref.read(schoolSessionProvider).asData?.value?.subject;
+    if (subject == null) return null;
+    await ref.read(schoolAuthRepositoryProvider).forgetPassword(subject);
+    if (mounted) ref.invalidate(rememberedSchoolPasswordProvider);
+    return '已删除本地保存的学号与密码';
   });
+
+  Future<void> _checkForUpdate() async {
+    if (_checkingForUpdate) return;
+    setState(() => _checkingForUpdate = true);
+    final AppUpdateResult result;
+    try {
+      result = await ref.read(appUpdatesProvider).checkForUpdate();
+    } catch (_) {
+      if (mounted) showMessage(context, '检查更新失败，请稍后重试');
+      return;
+    } finally {
+      if (mounted) setState(() => _checkingForUpdate = false);
+    }
+    if (!mounted) return;
+    switch (result) {
+      case NoPublishedAppRelease():
+        showMessage(context, '暂无可用更新');
+      case AppUpToDate():
+        showMessage(context, '当前已是最新版本');
+      case AppUpdateAvailable(
+        :final currentVersion,
+        :final latestVersion,
+        :final url,
+      ):
+        final open = await showDialog<bool>(
+          context: context,
+          builder: (context) => AlertDialog(
+            scrollable: true,
+            title: const Text('发现新版本'),
+            content: Text('当前版本 v$currentVersion\n最新版本 v$latestVersion'),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: const Text('关闭'),
+              ),
+              TextButton(
+                onPressed: () => Navigator.pop(context, true),
+                child: const Text('前往 GitHub 下载'),
+              ),
+            ],
+          ),
+        );
+        if (open == true && mounted) await openOfficialPage(context, url);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     final settings = ref.watch(settingsProvider);
     final controller = ref.read(settingsProvider.notifier);
     final connection = ref.watch(schoolConnectionProvider);
+    final remembered = ref.watch(rememberedSchoolPasswordProvider);
     final reminders = ref.watch(reminderSyncProvider);
+    final installedVersion = ref.watch(installedAppVersionProvider);
     final colors = Theme.of(context).colorScheme;
     final dark = colors.brightness == Brightness.dark;
     return Scaffold(
@@ -116,28 +142,6 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
               children: [
                 const Text('偏好设置', style: _sectionStyle),
                 const SizedBox(height: 6),
-                if (ref.watch(rememberedSchoolPasswordProvider).value == true)
-                  ListTile(
-                    leading: const Icon(Icons.lock_reset),
-                    title: const Text('删除已记住的学校密码'),
-                    onTap: _busy
-                        ? null
-                        : () => _run(() async {
-                            final subject = ref
-                                .read(schoolSessionProvider)
-                                .asData
-                                ?.value
-                                ?.subject;
-                            if (subject == null) return null;
-                            await ref
-                                .read(schoolAuthRepositoryProvider)
-                                .forgetPassword(subject);
-                            if (mounted) {
-                              ref.invalidate(rememberedSchoolPasswordProvider);
-                            }
-                            return '已删除本机保存的学校密码';
-                          }),
-                  ),
                 DataPanel(
                   value: settings,
                   retry: () => ref.invalidate(settingsProvider),
@@ -217,6 +221,18 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
                 const SizedBox(height: 6),
                 const Text('数据管理', style: _sectionStyle),
                 const SizedBox(height: 6),
+                if (remembered.value == true) ...[
+                  _ProfileTile(
+                    icon: const Icon(Icons.lock_reset),
+                    title: '删除本地保存的学号与密码',
+                    subtitle: '清除用于自动续登的凭据',
+                    accent: (colors.errorContainer, colors.onErrorContainer),
+                    onTap: _busy || remembered.isLoading
+                        ? null
+                        : _forgetCredentials,
+                  ),
+                  const SizedBox(height: 6),
+                ],
                 _ProfileTile(
                   icon: const Icon(Icons.delete_outline),
                   title: '清除缓存',
@@ -242,8 +258,22 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
                       : (const Color(0xFFE9E1FA), const Color(0xFF744BB4)),
                   onTap: () => _showInfo(
                     '隐私说明',
-                    '学期、课表、成绩和旧版考试记录保存在设备数据库。学校官网处理密码和验证码。校园卡余额和读取时间按账号加密保存在本机。应用使用派生标识隔离账号，无应用内统计。导出的 ICS 文件含明文课表数据，请妥善保管。',
+                    'NEUQ One 尊重并保护用户隐私。用户相关信息均在本地设备处理和存储，仅在使用相关功能时与学校系统或对应服务提供方进行必要的数据交互。\n\n'
+                        '本应用不会向项目维护者的服务器上传用户个人数据，不包含广告、行为追踪或用户数据统计功能，源代码公开可查。',
                   ),
+                ),
+                const SizedBox(height: 6),
+                _ProfileTile(
+                  icon: const Icon(Icons.system_update_alt_rounded),
+                  title: '检查更新',
+                  subtitle: installedVersion.when(
+                    data: (version) => '当前版本 v$version',
+                    loading: () => '正在读取当前版本…',
+                    error: (_, _) => '无法读取当前版本',
+                  ),
+                  accent: (colors.primaryContainer, colors.onPrimaryContainer),
+                  loadingLabel: _checkingForUpdate ? '正在检查更新' : null,
+                  onTap: _checkForUpdate,
                 ),
                 const SizedBox(height: 6),
                 _ProfileTile(
@@ -256,7 +286,6 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
                   onTap: () => _showInfo(
                     '关于 NEUQ One',
                     'NEUQ One 是面向东北大学秦皇岛分校学生的非官方开源校园工作台。学校的正式通知、成绩和业务办理以官方系统为准。',
-                    checkForUpdate: !_busy,
                   ),
                 ),
                 const SizedBox(height: 6),
@@ -270,7 +299,7 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
                         : const Color(0xFF344158),
                     excludeFromSemantics: true,
                   ),
-                  title: 'GitHub 仓库',
+                  title: 'GitHub',
                   subtitle: _repositoryUrl.isEmpty ? '发布地址待配置' : '源代码与问题反馈',
                   accent: dark
                       ? (const Color(0xFF343F51), const Color(0xFFD7E2F0))
@@ -288,32 +317,20 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
     );
   }
 
-  Future<void> _showInfo(
-    String title,
-    String content, {
-    bool checkForUpdate = false,
-  }) async {
-    final check = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        scrollable: true,
-        title: Text(title),
-        content: Text(content),
-        actions: [
-          if (checkForUpdate)
-            TextButton(
-              onPressed: () => Navigator.pop(context, true),
-              child: const Text('检查更新'),
-            ),
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('关闭'),
-          ),
-        ],
-      ),
-    );
-    if (check == true && mounted) await _checkForUpdate();
-  }
+  Future<void> _showInfo(String title, String content) => showDialog<void>(
+    context: context,
+    builder: (context) => AlertDialog(
+      scrollable: true,
+      title: Text(title),
+      content: Text(content),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('关闭'),
+        ),
+      ],
+    ),
+  );
 }
 
 String _themeLabel(ThemeMode theme) => switch (theme) {
@@ -468,12 +485,11 @@ class _AccountCard extends StatelessWidget {
                     children: [
                       Text('退出'),
                       SizedBox(width: 3),
-                      Icon(Icons.chevron_right, size: 17),
+                      Icon(Icons.logout_rounded, size: 17),
                     ],
                   ),
                 ),
               ),
-        onTap: () => openOfficialPage(context, 'https://eone.neuq.edu.cn/'),
       ),
     );
   }
@@ -487,6 +503,7 @@ class _ProfileTile extends StatelessWidget {
     this.subtitle,
     this.onTap,
     this.trailing = Icons.chevron_right,
+    this.loadingLabel,
   });
 
   final Widget icon;
@@ -495,6 +512,7 @@ class _ProfileTile extends StatelessWidget {
   final String? subtitle;
   final VoidCallback? onTap;
   final IconData trailing;
+  final String? loadingLabel;
 
   @override
   Widget build(BuildContext context) {
@@ -521,8 +539,16 @@ class _ProfileTile extends StatelessWidget {
                 subtitle!,
                 style: TextStyle(fontSize: 11, color: colors.onSurfaceVariant),
               ),
-        trailing: Icon(trailing, size: 17, color: colors.onSurfaceVariant),
-        onTap: onTap,
+        trailing: loadingLabel == null
+            ? Icon(trailing, size: 17, color: colors.onSurfaceVariant)
+            : SizedBox.square(
+                dimension: 17,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  semanticsLabel: loadingLabel,
+                ),
+              ),
+        onTap: loadingLabel == null ? onTap : null,
       ),
     );
   }

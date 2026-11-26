@@ -5,6 +5,7 @@ import '../../../core/widgets/editor.dart';
 import '../../../core/widgets/screen.dart';
 import '../data/campus_mail.dart';
 import 'mail_compose_page.dart';
+import 'mail_sender_avatar.dart';
 
 class MailMessagePage extends StatefulWidget {
   const MailMessagePage({
@@ -23,18 +24,20 @@ class MailMessagePage extends StatefulWidget {
 }
 
 class _MailMessagePageState extends State<MailMessagePage> {
-  late Future<MailDetails> _details = widget.repository.readMessage(
-    widget.preview.id,
-  );
-  late bool _starred = widget.preview.starred;
+  late Future<MailDetails> _details = widget.repository.readMessage(id);
+  bool? _starred;
   bool _busy = false;
+
+  MailMessageId get id => widget.preview.id;
 
   Future<void> _act(Future<void> Function() action, {bool back = false}) async {
     if (_busy) return;
     setState(() => _busy = true);
     try {
       await action();
-      if (mounted && back) Navigator.pop(context);
+      if (mounted && back && ModalRoute.of(context)?.isCurrent == true) {
+        Navigator.pop(context);
+      }
     } on FormatException catch (error) {
       if (mounted) showMessage(context, error.message);
     } catch (_) {
@@ -45,183 +48,238 @@ class _MailMessagePageState extends State<MailMessagePage> {
   }
 
   Future<void> _move() async {
-    final folders = widget.folders.where(
-      (folder) => folder.id != widget.preview.id.folder,
-    );
     final destination = await showDialog<MailFolder>(
       context: context,
       builder: (context) => SimpleDialog(
         title: const Text('移动到文件夹'),
         children: [
-          for (final folder in folders)
-            SimpleDialogOption(
-              onPressed: () => Navigator.pop(context, folder),
-              child: Text(folder.name),
-            ),
+          for (final folder in widget.folders)
+            if (folder.id != id.folder)
+              SimpleDialogOption(
+                onPressed: () => Navigator.pop(context, folder),
+                child: Text(folder.name),
+              ),
         ],
       ),
     );
     if (destination != null && mounted) {
-      await _act(
-        () => widget.repository.move(widget.preview.id, destination.id),
-        back: true,
-      );
+      await _act(() => widget.repository.move(id, destination.id), back: true);
+    }
+  }
+
+  Future<void> _trash(MailFolder folder) async {
+    final confirmed = await confirmAction(
+      context,
+      '移到已删除？',
+      '可从邮箱的「已删除」文件夹找回。',
+    );
+    if (confirmed && mounted) {
+      await _act(() => widget.repository.move(id, folder.id), back: true);
     }
   }
 
   @override
-  Widget build(BuildContext context) {
-    final id = widget.preview.id;
+  Widget build(BuildContext context) => FutureBuilder<MailDetails>(
+    future: _details,
+    builder: (context, snapshot) {
+      final message = snapshot.data;
+      return Scaffold(
+        appBar: _appBar(enabled: message != null && !_busy),
+        body: SafeArea(
+          top: false,
+          child: snapshot.hasError
+              ? ListView(
+                  padding: const EdgeInsets.all(16),
+                  children: [
+                    StatePanel(
+                      '无法读取邮件',
+                      '请检查网络后重试。',
+                      icon: Icons.error_outline,
+                      action: OutlinedButton(
+                        onPressed: () => setState(
+                          () => _details = widget.repository.readMessage(id),
+                        ),
+                        child: const Text('重试'),
+                      ),
+                    ),
+                  ],
+                )
+              : message == null
+              ? const Center(child: CircularProgressIndicator())
+              : _messageBody(message),
+        ),
+        bottomNavigationBar: message == null ? null : _replyBar(message),
+      );
+    },
+  );
+
+  AppBar _appBar({required bool enabled}) {
     final trash = widget.folders
         .where((folder) => folder.trash && folder.id != id.folder)
         .firstOrNull;
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('邮件详情'),
-        actions: [
+    return AppBar(
+      actions: [
+        if (widget.folders.any((folder) => folder.id != id.folder))
           IconButton(
-            tooltip: _starred ? '取消星标' : '添加星标',
-            icon: Icon(_starred ? Icons.star : Icons.star_border),
-            onPressed: _busy
-                ? null
-                : () => _act(() async {
-                    await widget.repository.setStarred(id, !_starred);
-                    if (mounted) setState(() => _starred = !_starred);
-                  }),
+            tooltip: '移动到文件夹',
+            icon: const Icon(Icons.drive_file_move_outlined),
+            onPressed: enabled ? _move : null,
           ),
-          PopupMenuButton<String>(
-            enabled: !_busy,
-            onSelected: (action) async {
-              switch (action) {
-                case 'unread':
-                  await _act(
-                    () => widget.repository.markUnread(id),
-                    back: true,
-                  );
-                case 'move':
-                  await _move();
-                case 'trash':
-                  if (trash != null &&
-                      await confirmAction(
-                        context,
-                        '移到已删除？',
-                        '可从邮箱的「已删除」文件夹找回。',
-                      ) &&
-                      mounted) {
-                    await _act(
-                      () => widget.repository.move(id, trash.id),
-                      back: true,
-                    );
-                  }
-              }
-            },
-            itemBuilder: (context) => [
-              const PopupMenuItem(value: 'unread', child: Text('标为未读')),
-              if (widget.folders.length > 1)
-                const PopupMenuItem(value: 'move', child: Text('移动到文件夹')),
-              if (trash != null)
-                const PopupMenuItem(value: 'trash', child: Text('移到已删除')),
-            ],
+        IconButton(
+          tooltip: '标为未读',
+          icon: const Icon(Icons.mark_email_unread_outlined),
+          onPressed: enabled
+              ? () => _act(() => widget.repository.markUnread(id), back: true)
+              : null,
+        ),
+        if (trash != null)
+          IconButton(
+            tooltip: '移到已删除',
+            icon: const Icon(Icons.delete_outline_rounded),
+            onPressed: enabled ? () => _trash(trash) : null,
           ),
-        ],
-      ),
-      body: SafeArea(
-        child: FutureBuilder<MailDetails>(
-          future: _details,
-          builder: (context, snapshot) {
-            final message = snapshot.data;
-            if (snapshot.hasError) {
-              return StatePanel(
-                '无法读取邮件',
-                '请检查网络后重试。',
-                icon: Icons.error_outline,
-                action: OutlinedButton(
-                  onPressed: () => setState(
-                    () => _details = widget.repository.readMessage(id),
-                  ),
-                  child: const Text('重试'),
-                ),
-              );
-            }
-            if (message == null) {
-              return const Center(child: CircularProgressIndicator());
-            }
-            final preview = message.preview;
-            final subject = preview.subject;
-            final date = preview.date?.toUtc().add(campusOffset);
-            return ListView(
-              padding: const EdgeInsets.fromLTRB(16, 6, 16, 24),
+      ],
+    );
+  }
+
+  Widget _messageBody(MailDetails message) {
+    final theme = Theme.of(context);
+    final colors = theme.colorScheme;
+    final preview = message.preview;
+    final starred = _starred ?? preview.starred;
+    final date = preview.date?.toUtc().add(campusOffset);
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(16, 4, 16, 20),
+      children: [
+        if (_busy) const LinearProgressIndicator(minHeight: 2),
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: Text(
+                preview.subject.isEmpty ? '（无主题）' : preview.subject,
+                style: theme.textTheme.headlineSmall,
+              ),
+            ),
+            IconButton(
+              tooltip: starred ? '取消星标' : '添加星标',
+              isSelected: starred,
+              selectedIcon: Icon(Icons.star_rounded, color: colors.primary),
+              icon: const Icon(Icons.star_outline_rounded),
+              onPressed: _busy
+                  ? null
+                  : () => _act(() async {
+                      await widget.repository.setStarred(id, !starred);
+                      if (mounted) setState(() => _starred = !starred);
+                    }),
+            ),
+          ],
+        ),
+        const SizedBox(height: 16),
+        Card(
+          child: Padding(
+            padding: const EdgeInsets.all(14),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                if (_busy) const LinearProgressIndicator(),
-                Text(
-                  subject.isEmpty ? '（无主题）' : subject,
-                  style: Theme.of(context).textTheme.headlineSmall,
-                ),
-                const SizedBox(height: 8),
-                Text('发件人 · ${preview.sender}'),
-                if (message.recipients.isNotEmpty)
-                  Text('收件人 · ${message.recipients}'),
-                if (date != null)
-                  Text(
-                    '${date.year}年${shortDate(date)} ${clockLabel(date.hour * 60 + date.minute)}',
-                  ),
-                const Divider(height: 30),
-                SelectableText(
-                  message.body.isEmpty ? '（无可显示正文）' : message.body,
-                ),
-                const SizedBox(height: 18),
-                for (final attachment in message.attachments)
-                  Card(
-                    child: ListTile(
-                      leading: const Icon(Icons.attach_file),
-                      title: Text(attachment.name),
-                      trailing: const Icon(Icons.download_outlined),
-                      onTap: _busy
-                          ? null
-                          : () => _act(() async {
-                              final saved = await widget.repository
-                                  .saveAttachment(id, attachment);
-                              if (saved && context.mounted) {
-                                showMessage(context, '附件已保存');
-                              }
-                            }),
-                    ),
-                  ),
-                Wrap(
-                  spacing: 8,
-                  children: [
-                    if (message.replyTo.isNotEmpty)
-                      OutlinedButton.icon(
-                        onPressed: () => openMailComposer(
-                          context,
-                          widget.repository,
-                          recipients: message.replyTo,
-                          subject: subject.toLowerCase().startsWith('re:')
-                              ? subject
-                              : 'Re: $subject',
-                          inReplyTo: message.messageId,
+                MailSenderAvatar(preview.sender),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(preview.sender, style: theme.textTheme.titleSmall),
+                      if (message.recipients.isNotEmpty)
+                        Text(
+                          '收件人 ${message.recipients}',
+                          style: theme.textTheme.bodySmall,
                         ),
-                        icon: const Icon(Icons.reply),
-                        label: const Text('回复'),
-                      ),
-                    OutlinedButton.icon(
-                      onPressed: () => openMailComposer(
-                        context,
-                        widget.repository,
-                        subject: subject.toLowerCase().startsWith('fwd:')
-                            ? subject
-                            : 'Fwd: $subject',
-                        body:
-                            '\n\n转发邮件\n发件人 · ${preview.sender}\n主题 · $subject\n\n${message.body}',
-                      ),
-                      icon: const Icon(Icons.forward),
-                      label: const Text('转发'),
-                    ),
-                  ],
+                      if (date != null)
+                        Text(
+                          '${date.year}年${shortDate(date)} ${clockLabel(date.hour * 60 + date.minute)}',
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: colors.onSurfaceVariant,
+                          ),
+                        ),
+                    ],
+                  ),
                 ),
               ],
-            );
-          },
+            ),
+          ),
+        ),
+        const SizedBox(height: 20),
+        SelectableText(
+          message.body.isEmpty ? '（无可显示正文）' : message.body,
+          style: theme.textTheme.bodyLarge?.copyWith(height: 1.55),
+        ),
+        for (final attachment in message.attachments)
+          Padding(
+            padding: const EdgeInsets.only(top: 12),
+            child: Card(
+              child: ListTile(
+                leading: const Icon(Icons.attach_file),
+                title: Text(attachment.name),
+                trailing: const Icon(Icons.download_outlined),
+                onTap: _busy
+                    ? null
+                    : () => _act(() async {
+                        final saved = await widget.repository.saveAttachment(
+                          id,
+                          attachment,
+                        );
+                        if (saved && mounted) showMessage(context, '附件已保存');
+                      }),
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+
+  Widget _replyBar(MailDetails message) {
+    final subject = message.preview.subject;
+    return Material(
+      color: Theme.of(context).colorScheme.surface,
+      child: SafeArea(
+        top: false,
+        minimum: const EdgeInsets.fromLTRB(16, 6, 16, 6),
+        child: Wrap(
+          spacing: 8,
+          runSpacing: 4,
+          children: [
+            if (message.replyTo.isNotEmpty)
+              FilledButton.tonalIcon(
+                onPressed: _busy
+                    ? null
+                    : () => openMailComposer(
+                        context,
+                        widget.repository,
+                        recipients: message.replyTo,
+                        subject: subject.toLowerCase().startsWith('re:')
+                            ? subject
+                            : 'Re: $subject',
+                        inReplyTo: message.messageId,
+                      ),
+                icon: const Icon(Icons.reply_rounded),
+                label: const Text('回复'),
+              ),
+            OutlinedButton.icon(
+              onPressed: _busy
+                  ? null
+                  : () => openMailComposer(
+                      context,
+                      widget.repository,
+                      subject: subject.toLowerCase().startsWith('fwd:')
+                          ? subject
+                          : 'Fwd: $subject',
+                      body:
+                          '\n\n转发邮件\n发件人 · ${message.preview.sender}\n主题 · $subject\n\n${message.body}',
+                    ),
+              icon: const Icon(Icons.forward_outlined),
+              label: const Text('转发'),
+            ),
+          ],
         ),
       ),
     );

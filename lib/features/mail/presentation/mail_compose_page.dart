@@ -106,9 +106,17 @@ class _MailComposePageState extends State<_MailComposePage> {
   Widget _address(TextEditingController controller, String label) => TextField(
     controller: controller,
     keyboardType: TextInputType.emailAddress,
+    textInputAction: TextInputAction.next,
     enabled: !_sending,
     autocorrect: false,
-    decoration: InputDecoration(labelText: label),
+    decoration: _decoration(label),
+  );
+
+  InputDecoration _decoration(String label) => InputDecoration(
+    labelText: label,
+    border: InputBorder.none,
+    filled: false,
+    contentPadding: const EdgeInsets.symmetric(vertical: 14),
   );
 
   @override
@@ -123,55 +131,77 @@ class _MailComposePageState extends State<_MailComposePage> {
             onPressed: _sending || _picking ? null : _attach,
             icon: const Icon(Icons.attach_file),
           ),
-          TextButton(
-            onPressed: _sending || _picking ? null : _send,
-            child: const Text('发送'),
+          Padding(
+            padding: const EdgeInsets.only(right: 12),
+            child: FilledButton(
+              onPressed: _sending || _picking ? null : _send,
+              child: const Text('发送'),
+            ),
           ),
         ],
       ),
       body: SafeArea(
+        top: false,
         child: ListView(
-          padding: const EdgeInsets.fromLTRB(16, 6, 16, 24),
+          padding: const EdgeInsets.fromLTRB(20, 4, 20, 24),
           children: [
             if (_sending) const LinearProgressIndicator(),
             Row(
               children: [
                 Expanded(child: _address(_to, '收件人')),
-                TextButton(
-                  onPressed: () => setState(() => _more = !_more),
-                  child: const Text('抄送／密送'),
+                Semantics(
+                  expanded: _more,
+                  child: TextButton(
+                    onPressed: _sending
+                        ? null
+                        : () => setState(() => _more = !_more),
+                    child: const Text('抄送／密送'),
+                  ),
                 ),
               ],
             ),
-            if (_more) ...[_address(_cc, '抄送'), _address(_bcc, '密送')],
-            const SizedBox(height: 8),
+            const Divider(height: 1),
+            if (_more) ...[
+              _address(_cc, '抄送'),
+              const Divider(height: 1),
+              _address(_bcc, '密送'),
+              const Divider(height: 1),
+            ],
             TextField(
               controller: _subject,
               enabled: !_sending,
               maxLength: 250,
-              decoration: const InputDecoration(labelText: '主题'),
+              textInputAction: TextInputAction.next,
+              decoration: _decoration('主题').copyWith(counterText: ''),
             ),
+            const Divider(height: 1),
             TextField(
               controller: _body,
               enabled: !_sending,
               keyboardType: TextInputType.multiline,
               minLines: 8,
               maxLines: null,
-              decoration: const InputDecoration(
-                labelText: '正文',
-                alignLabelWithHint: true,
-              ),
+              decoration: _decoration('正文').copyWith(alignLabelWithHint: true),
             ),
             for (final file in _attachments)
-              ListTile(
-                leading: const Icon(Icons.attach_file),
-                title: Text(file.name),
-                trailing: IconButton(
-                  tooltip: '移除附件',
-                  icon: const Icon(Icons.close),
-                  onPressed: _sending
-                      ? null
-                      : () => setState(() => _attachments.remove(file)),
+              Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: Card(
+                  child: ListTile(
+                    leading: const Icon(Icons.attach_file),
+                    title: Text(
+                      file.name,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    trailing: IconButton(
+                      tooltip: '移除附件',
+                      icon: const Icon(Icons.close),
+                      onPressed: _sending
+                          ? null
+                          : () => setState(() => _attachments.remove(file)),
+                    ),
+                  ),
                 ),
               ),
             if (_error case final String error)

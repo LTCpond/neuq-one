@@ -12,6 +12,7 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:neuq_one/app/app.dart';
+import 'package:neuq_one/app/login_page.dart';
 import 'package:neuq_one/app/router.dart';
 import 'package:neuq_one/core/auth/school_auth.dart';
 import 'package:neuq_one/core/database/school_data.dart';
@@ -76,14 +77,14 @@ void main() {
     expect(find.byType(ClassroomsPage), findsNothing);
   });
 
-  _appTest('a verified session unlocks the app and logout clears access', (
-    tester,
-  ) async {
+  final loginAuth = _RememberingTestAuth(restore: false);
+  _appTest('logout waits for saved credentials to be deleted', (tester) async {
     expect(find.byType(NavigationBar), findsNothing);
     expect(
       tester.widget<CheckboxListTile>(find.byType(CheckboxListTile)).value,
       isFalse,
     );
+    await tester.tap(find.byType(CheckboxListTile));
     await tester.enterText(find.byType(TextFormField).at(0), '00001234');
     await tester.enterText(find.byType(TextFormField).at(1), 'test-password');
     await tester.tap(find.text('统一身份认证登录'));
@@ -94,13 +95,110 @@ void main() {
       '/timetable',
     );
     expect(find.byType(TimetablePage), findsOneWidget);
+    expect(loginAuth.remembered, isTrue);
     await _tab(tester, '我的');
     await tester.ensureVisible(find.byTooltip('退出统一身份认证'));
+    final pending = loginAuth.pendingLogout = Completer<void>();
     await tester.tap(find.byTooltip('退出统一身份认证'));
+    await tester.pump();
+    expect(find.text('学校身份已验证'), findsOneWidget);
+    expect(find.text('统一身份认证登录'), findsNothing);
+    expect(loginAuth.remembered, isTrue);
+
+    pending.complete();
     await tester.pumpAndSettle();
+    expect(loginAuth.remembered, isFalse);
     expect(find.byType(NavigationBar), findsNothing);
     expect(find.text('统一身份认证登录'), findsOneWidget);
-  }, auth: const _TestAuth(restore: false));
+  }, auth: loginAuth);
+
+  final profileAuth = _RememberingTestAuth(remembered: true);
+  _appTest(
+    'profile shows identity status, credential removal and the privacy notice',
+    (tester) async {
+      await _tab(tester, '我的');
+      final status = find.text('学校身份已验证');
+      final statusTile = find.ancestor(
+        of: status,
+        matching: find.byType(ListTile),
+      );
+      expect(tester.widget<ListTile>(statusTile).onTap, isNull);
+      await tester.tap(status);
+      await tester.pumpAndSettle();
+      expect(
+        _router(tester).routeInformationProvider.value.uri.path,
+        '/profile',
+      );
+
+      final credentials = find.text('删除本地保存的学号与密码');
+      await tester.ensureVisible(credentials);
+      expect(
+        tester.getTopLeft(credentials).dy,
+        greaterThan(tester.getTopLeft(find.text('数据管理')).dy),
+      );
+      expect(
+        tester.getTopLeft(credentials).dy,
+        lessThan(tester.getTopLeft(find.text('关于')).dy),
+      );
+      await tester.tap(credentials);
+      await tester.pumpAndSettle();
+      expect(profileAuth.remembered, isFalse);
+      expect(credentials, findsNothing);
+      expect(
+        _router(tester).routeInformationProvider.value.uri.path,
+        '/profile',
+      );
+
+      final privacy = find.text('隐私说明');
+      await tester.ensureVisible(privacy);
+      await tester.tap(privacy);
+      await tester.pumpAndSettle();
+      expect(
+        find.text(
+          'NEUQ One 尊重并保护用户隐私。用户相关信息均在本地设备处理和存储，仅在使用相关功能时与学校系统或对应服务提供方进行必要的数据交互。\n\n'
+          '本应用不会向项目维护者的服务器上传用户个人数据，不包含广告、行为追踪或用户数据统计功能，源代码公开可查。',
+        ),
+        findsOneWidget,
+      );
+    },
+    auth: profileAuth,
+  );
+
+  for (final restoreSavedSession in [true, false]) {
+    late Completer<SchoolSession?> restoration;
+    _appTest(
+      restoreSavedSession
+          ? 'cold start goes directly to the timetable after session restoration'
+          : 'cold start shows login only after confirming there is no session',
+      (tester) async {
+        expect(
+          find.byType(TimetablePage),
+          restoreSavedSession ? findsOneWidget : findsNothing,
+        );
+        expect(
+          find.byType(LoginPage),
+          restoreSavedSession ? findsNothing : findsOneWidget,
+        );
+      },
+      auth: _TestAuth(
+        restoration: () {
+          restoration = Completer<SchoolSession?>();
+          return restoration.future;
+        },
+      ),
+      beforeSettle: (tester) async {
+        await tester.pump(const Duration(milliseconds: 300));
+        expect(find.byType(CircularProgressIndicator), findsOneWidget);
+        expect(find.byType(LoginPage), findsNothing);
+        expect(find.byType(TimetablePage), findsNothing);
+        restoration.complete(restoreSavedSession ? _TestAuth._session : null);
+        await tester.pump();
+        if (restoreSavedSession) {
+          expect(find.byType(LoginPage), findsNothing);
+        }
+      },
+    );
+  }
 
   _appTest(
     'a restored session opens the timetable and redirects the old root',
@@ -937,6 +1035,7 @@ void _appTest(
   String description,
   Future<void> Function(WidgetTester) scenario, {
   _TestAuth auth = const _TestAuth(),
+  Future<void> Function(WidgetTester)? beforeSettle,
   SchoolGradeBook? schoolGrades,
   Timetable? initialTimetable,
   CampusCardBalance? campusCardBalance,
@@ -1026,6 +1125,7 @@ void _appTest(
           child: const NeuqOneApp(),
         ),
       );
+      await beforeSettle?.call(tester);
       await tester.pumpAndSettle();
       await scenario(tester);
     } finally {
@@ -1129,8 +1229,9 @@ Future<void> _createSemester(WidgetTester tester) async {
 }
 
 class _TestAuth implements SchoolAuthRepository {
-  const _TestAuth({this.restore = true});
+  const _TestAuth({this.restore = true, this.restoration});
   final bool restore;
+  final Future<SchoolSession?> Function()? restoration;
 
   @override
   bool get available => true;
@@ -1143,7 +1244,8 @@ class _TestAuth implements SchoolAuthRepository {
   @override
   Future<void> forgetPassword(String subject) async {}
   @override
-  Future<SchoolSession?> restoreSession() async => restore ? _session : null;
+  Future<SchoolSession?> restoreSession() =>
+      restoration?.call() ?? Future.value(restore ? _session : null);
   @override
   Future<SchoolSession> signIn(
     NeuqCredentials credentials, {
@@ -1155,6 +1257,38 @@ class _TestAuth implements SchoolAuthRepository {
     subject: 'test-owner',
     admissionYear: 2025,
   );
+}
+
+class _RememberingTestAuth extends _TestAuth {
+  _RememberingTestAuth({super.restore, this.remembered = false});
+
+  bool remembered;
+  Completer<void>? pendingLogout;
+
+  @override
+  Future<bool> hasRememberedPassword(String subject) async => remembered;
+
+  @override
+  Future<void> forgetPassword(String subject) async {
+    expect(subject, _TestAuth._session.subject);
+    remembered = false;
+  }
+
+  @override
+  Future<void> disconnect() async {
+    await pendingLogout?.future;
+    remembered = false;
+  }
+
+  @override
+  Future<SchoolSession> signIn(
+    NeuqCredentials credentials, {
+    required bool rememberPassword,
+    String? expectedSubject,
+  }) async {
+    remembered = rememberPassword;
+    return _TestAuth._session;
+  }
 }
 
 class _TestSettings extends SettingsController {
