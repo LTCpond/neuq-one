@@ -7,8 +7,8 @@ import '../core/database/school_data.dart';
 import '../core/theme/app_theme.dart';
 import '../features/grades/presentation/grades_page.dart';
 import '../features/mail/presentation/campus_mail_page.dart';
-import '../features/profile/data/course_reminders.dart';
 import '../features/profile/presentation/profile_page.dart';
+import '../features/profile/presentation/update_prompt.dart';
 import '../features/services/presentation/campus_card_page.dart';
 import '../features/services/presentation/campus_map_page.dart';
 import '../features/services/presentation/classrooms_page.dart';
@@ -34,8 +34,11 @@ final routerProvider = Provider<GoRouter>((ref) {
     schoolSessionProvider.select((value) => value.asData?.value?.subject),
   );
   final rootNavigator = GlobalKey<NavigatorState>();
+  final rootUpdates = AppUpdateRouteObserver();
+  final branchUpdates = [for (final _ in _tabs) AppUpdateRouteObserver()];
   final router = GoRouter(
     navigatorKey: rootNavigator,
+    observers: [rootUpdates],
     initialLocation: _timetablePath,
     redirect: (context, state) {
       final onLogin = state.matchedLocation == '/login';
@@ -48,10 +51,16 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(path: '/login', builder: (context, state) => const LoginPage()),
       GoRoute(path: '/', redirect: (context, state) => _timetablePath),
       StatefulShellRoute.indexedStack(
-        builder: (context, state, shell) => _Navigation(shell),
+        notifyRootObserver: false,
+        builder: (context, state, shell) => AppUpdatePromptHost(
+          root: rootUpdates,
+          branch: branchUpdates[shell.currentIndex],
+          child: _Navigation(shell),
+        ),
         branches: [
-          for (final tab in _tabs)
+          for (final (index, tab) in _tabs.indexed)
             StatefulShellBranch(
+              observers: [branchUpdates[index]],
               routes: [
                 GoRoute(
                   path: tab.path,
@@ -94,7 +103,13 @@ final routerProvider = Provider<GoRouter>((ref) {
       ),
     ],
   );
-  ref.onDispose(router.dispose);
+  ref.onDispose(() {
+    router.dispose();
+    rootUpdates.dispose();
+    for (final branch in branchUpdates) {
+      branch.dispose();
+    }
+  });
   return router;
 });
 
@@ -115,7 +130,6 @@ class _NavigationState extends ConsumerState<_Navigation> {
     super.initState();
     _lifecycle = AppLifecycleListener(
       onResume: () {
-        ref.invalidate(reminderSyncProvider);
         ref.invalidate(schoolRefreshProvider(SchoolDataSet.timetable));
         ref.invalidate(timetableDateProvider);
       },

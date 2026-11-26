@@ -19,6 +19,40 @@ import 'package:neuq_one/features/services/domain/classrooms.dart';
 import 'fixtures/classroom_week.dart';
 
 void main() {
+  test('building time uses only its own slots and classifies partial and historical data', () {
+    final json = classroomWeekFixture();
+    fixtureDay(json)['complete'] = false;
+    final science = fixturePeriods(json, CampusBuilding.science);
+    for (final period in science.keys) {
+      science[period] = period == '1-2'
+          ? classroomSlotFixture(null, status: 'unavailable')
+          : classroomSlotFixture([
+              '6077',
+            ], collectedAt: '2026-11-25T16:17:00+08:00');
+    }
+    final day = readClassroomWeek(jsonEncode(json)).days[classroomToday]!;
+    final slots = day.buildings[CampusBuilding.science];
+    expect(classroomBuildingAt(slots, classroomNow), (
+      updatedAt: DateTime.utc(2026, 11, 25, 8, 17),
+      status: ClassroomBuildingStatus.partial,
+    ));
+    expect(
+      classroomBuildingAt(
+        day.buildings[CampusBuilding.engineering],
+        classroomNow,
+      ).status,
+      ClassroomBuildingStatus.fresh,
+    );
+    expect(
+      classroomBuildingAt(slots, DateTime.utc(2026, 11, 25, 9, 20)).status,
+      ClassroomBuildingStatus.historical,
+    );
+    expect(
+      classroomBuildingAt({1: slots![1]!}, classroomNow).status,
+      ClassroomBuildingStatus.unavailable,
+    );
+    expect(classroomScheduleAt(slots, classroomNow).allDay, isEmpty);
+  });
   test(
     'decodes seven consecutive Beijing dates, buildings and period keys',
     () {
@@ -323,7 +357,7 @@ void main() {
   );
 
   test(
-    'automatic refresh uses the thirty-minute interval and early slot expiry',
+    'automatic refresh uses the five-minute interval and early slot expiry',
     () async {
       var now = classroomNow;
       var calls = 0;
@@ -333,17 +367,20 @@ void main() {
       }, clock: () => now);
       final controller = scope.read(classroomsProvider.notifier);
       await controller.refresh();
-      now = now.add(const Duration(minutes: 29));
+      now = now.add(const Duration(minutes: 4));
       await controller.refresh();
       expect(calls, 1);
       now = now.add(const Duration(minutes: 1));
       await controller.refresh();
       expect(calls, 2);
-      now = now.add(const Duration(minutes: 29));
+      now = DateTime.utc(2026, 11, 25, 9, 18, 59);
       await controller.refresh();
       expect(calls, 3);
+      now = now.add(const Duration(seconds: 1));
       await controller.refresh();
-      expect(calls, 3);
+      expect(calls, 4);
+      await controller.refresh();
+      expect(calls, 4);
     },
   );
 
@@ -353,6 +390,46 @@ void main() {
     expect(scope.read(classroomsProvider).snapshot, isNull);
     expect(scope.read(classroomsProvider).refreshFailed, isTrue);
   });
+
+  test(
+    'clearing while a conditional GET runs drops its result and the validators',
+    () async {
+      final cache = ClassroomCache(NativeDatabase.memory());
+      addTearDown(cache.close);
+      final requestStarted = Completer<void>();
+      final reply = Completer<http.Response>();
+      var calls = 0;
+      final scope = _scope((request) async {
+        switch (++calls) {
+          case 1:
+            return _json(
+              headers: {'etag': '"old"', 'last-modified': 'old date'},
+            );
+          case 2:
+            expect(request.headers['if-none-match'], '"old"');
+            requestStarted.complete();
+            return reply.future;
+          default:
+            expect(request.headers['if-none-match'], isNull);
+            expect(request.headers['if-modified-since'], isNull);
+            return _json(headers: {'etag': '"new"'});
+        }
+      }, cache: cache);
+      final controller = scope.read(classroomsProvider.notifier);
+      await controller.refresh();
+      expect(await cache.cacheBytes(), greaterThan(0));
+      final refreshing = controller.refresh(force: true);
+      await requestStarted.future;
+      await controller.clearCache();
+      reply.complete(_json(headers: {'etag': '"stale"'}));
+      await refreshing;
+      expect(await cache.cacheBytes(), 0);
+      expect(scope.read(classroomsProvider).snapshot, isNull);
+      await controller.refresh();
+      expect(calls, 3);
+      expect((await cache.readWeek())!.etag, '"new"');
+    },
+  );
 
   test(
     'Beijing midnight revalidates once and cached days match exactly',

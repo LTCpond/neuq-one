@@ -8,11 +8,13 @@ class AppSettings {
   const AppSettings({
     this.theme = ThemeMode.system,
     this.reminderMinutes = 0,
+    this.allowInexactReminders = false,
     this.admissionYear = 2025,
   });
 
   final ThemeMode theme;
   final int reminderMinutes;
+  final bool allowInexactReminders;
   final int admissionYear;
 }
 
@@ -33,6 +35,8 @@ class SettingsController extends AsyncNotifier<AppSettings> {
         orElse: () => ThemeMode.system,
       ),
       reminderMinutes: await prefs.getInt('reminderMinutes') ?? 0,
+      allowInexactReminders:
+          await prefs.getBool('allowInexactReminders') ?? false,
       admissionYear: await prefs.getInt('admissionYear') ?? 2025,
     );
   }
@@ -41,6 +45,8 @@ class SettingsController extends AsyncNotifier<AppSettings> {
       _update(() => _prefs.setString('theme', value.name));
   Future<void> setReminder(int value) =>
       _update(() => _prefs.setInt('reminderMinutes', value));
+  Future<void> setInexactReminders(bool value) =>
+      _update(() => _prefs.setBool('allowInexactReminders', value));
   Future<void> _update(Future<void> Function() write) async {
     await write();
     ref.invalidateSelf();

@@ -7,11 +7,20 @@ import 'package:http/http.dart' as http;
 import 'package:webview_flutter/webview_flutter.dart';
 
 import '../network/neuq_client.dart';
+import '../diagnostics/diagnostics.dart';
 import 'neuq_login_protocol.dart';
 
 export '../network/neuq_client.dart' show NeuqCredentials, SchoolRequestFailure;
 
-enum SchoolConnection { unavailable, disconnected, connected }
+enum SchoolConnection {
+  unavailable,
+  disconnected,
+  connected,
+  restoring,
+  expired,
+  offline,
+  unknown,
+}
 
 class SchoolSession {
   const SchoolSession({required this.subject, this.admissionYear});
@@ -138,7 +147,12 @@ class _SchoolLoginStore {
     try {
       final value = jsonDecode(raw);
       return value is Map<String, dynamic> ? value : const {};
-    } on FormatException {
+    } on FormatException catch (error) {
+      diagnostics.record(
+        DiagnosticModule.schoolAuth,
+        DiagnosticStage.decode,
+        error: error,
+      );
       return const {};
     }
   }
@@ -197,6 +211,21 @@ final neuqHttpClientFactoryProvider = Provider<http.Client Function()>(
   (_) => http.Client.new,
 );
 
+final schoolSessionStatusProvider =
+    NotifierProvider<SchoolSessionStatusController, SchoolSessionStatus>(
+      SchoolSessionStatusController.new,
+    );
+
+class SchoolSessionStatusController extends Notifier<SchoolSessionStatus> {
+  @override
+  SchoolSessionStatus build() =>
+      (subject: null, health: SchoolSessionHealth.unknown);
+
+  void update(SchoolSessionStatus next) {
+    if (state != next) state = next;
+  }
+}
+
 final neuqClientProvider = Provider<NeuqClient>((ref) {
   final store = ref.watch(_schoolLoginStoreProvider);
   final client = NeuqClient(
@@ -205,6 +234,11 @@ final neuqClientProvider = Provider<NeuqClient>((ref) {
         : Future.value(),
     forgetRemembered: store.forget,
     createClient: ref.watch(neuqHttpClientFactoryProvider),
+    onSessionStatus: (status) {
+      if (ref.mounted) {
+        ref.read(schoolSessionStatusProvider.notifier).update(status);
+      }
+    },
   );
   ref.onDispose(client.dispose);
   return client;
@@ -224,36 +258,56 @@ final schoolSessionProvider =
     );
 
 class SchoolSessionController extends AsyncNotifier<SchoolSession?> {
+  int _revision = 0;
+  bool _disconnecting = false;
+
   @override
-  Future<SchoolSession?> build() {
+  Future<SchoolSession?> build() async {
     final repository = ref.watch(schoolAuthRepositoryProvider);
-    return repository.available ? repository.restoreSession() : Future.value();
+    try {
+      return repository.available ? await repository.restoreSession() : null;
+    } catch (error) {
+      diagnostics.record(
+        DiagnosticModule.schoolAuth,
+        DiagnosticStage.restore,
+        error: error,
+      );
+      rethrow;
+    }
   }
 
   Future<void> signIn(
     NeuqCredentials credentials, {
     required bool rememberPassword,
   }) async {
-    if (state.isLoading) return;
+    if (state.isLoading || _disconnecting) return;
     final repository = ref.read(schoolAuthRepositoryProvider);
     if (!repository.available) return;
     final previous = state.asData?.value;
+    final revision = ++_revision;
     state = const AsyncLoading();
     try {
       final session = await repository.signIn(
         credentials,
         rememberPassword: rememberPassword,
       );
-      if (ref.mounted) state = AsyncData(session);
+      if (ref.mounted && revision == _revision) state = AsyncData(session);
     } catch (_) {
-      if (ref.mounted) state = AsyncData(previous);
+      if (ref.mounted && revision == _revision) state = AsyncData(previous);
       rethrow;
     }
   }
 
   Future<void> disconnect() async {
-    await ref.read(schoolAuthRepositoryProvider).disconnect();
-    if (ref.mounted) state = const AsyncData(null);
+    if (_disconnecting) return;
+    _disconnecting = true;
+    _revision++;
+    try {
+      await ref.read(schoolAuthRepositoryProvider).disconnect();
+    } finally {
+      if (ref.mounted) state = const AsyncData(null);
+      _disconnecting = false;
+    }
   }
 }
 
@@ -261,10 +315,17 @@ final schoolConnectionProvider = FutureProvider<SchoolConnection>((ref) async {
   if (!ref.watch(schoolAuthRepositoryProvider).available) {
     return SchoolConnection.unavailable;
   }
+  final health = ref.watch(schoolSessionStatusProvider);
   final session = await ref.watch(schoolSessionProvider.future);
-  return session == null
-      ? SchoolConnection.disconnected
-      : SchoolConnection.connected;
+  if (session == null) return SchoolConnection.disconnected;
+  if (health.subject != session.subject) return SchoolConnection.unknown;
+  return switch (health.health) {
+    SchoolSessionHealth.unknown => SchoolConnection.unknown,
+    SchoolSessionHealth.restoring => SchoolConnection.restoring,
+    SchoolSessionHealth.connected => SchoolConnection.connected,
+    SchoolSessionHealth.expired => SchoolConnection.expired,
+    SchoolSessionHealth.offline => SchoolConnection.offline,
+  };
 });
 
 final schoolTicketStorageProvider = Provider<FlutterSecureStorage>(

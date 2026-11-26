@@ -3,6 +3,8 @@ import 'dart:io' show HttpDate, HttpException;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/network/public_data_client.dart';
+import '../../../core/diagnostics/diagnostics.dart';
+import '../../../core/storage/cache_files.dart';
 import '../../../core/time/campus_clock.dart';
 import '../domain/classrooms.dart';
 import 'classroom_cache.dart';
@@ -29,37 +31,61 @@ class ClassroomsState {
 
 class Classrooms extends Notifier<ClassroomsState> {
   static const _path = '/api/v1/classrooms/week.json';
-  static const _refreshInterval = Duration(minutes: 30);
+  static const refreshInterval = Duration(minutes: 5);
+  final _writes = CacheWrites();
   ClassroomCacheEntry? _cached;
   DateTime? _lastAttempt;
   Future<void>? _inFlight;
   bool _loadedCache = false;
+  int _consecutiveFailures = 0;
 
   @override
   ClassroomsState build() => const ClassroomsState(isLoading: true);
 
-  Future<void> refresh({bool force = false}) =>
-      _inFlight ??= _refresh(force).whenComplete(() => _inFlight = null);
+  Future<void> refresh({bool force = false}) {
+    final version = _writes.version;
+    if (version == null) return Future.value();
+    return _inFlight ??= _refresh(force, version).whenComplete(() {
+      if (_writes.current(version)) _inFlight = null;
+    });
+  }
 
-  Future<void> _refresh(bool force) async {
+  Future<void> clearCache() {
+    final cache = ref.read(classroomCacheProvider);
+    final clearing = _writes.clear(cache.removeWeek);
+    _cached = null;
+    _lastAttempt = null;
+    _inFlight = null;
+    _loadedCache = false;
+    _consecutiveFailures = 0;
+    state = const ClassroomsState();
+    return clearing;
+  }
+
+  Future<void> _refresh(bool force, int version) async {
+    bool current() => ref.mounted && _writes.current(version);
     final cache = ref.read(classroomCacheProvider);
     final clock = ref.read(classroomsClockProvider);
     if (!_loadedCache) {
       _loadedCache = true;
       try {
         final stored = await cache.readWeek();
-        if (!ref.mounted) return;
+        if (!current()) return;
         if (stored != null) {
           final snapshot = readClassroomWeek(stored.payload);
           _cached = stored;
           _lastAttempt = stored.checkedAt;
           state = ClassroomsState(snapshot: snapshot);
         }
-      } catch (_) {
-        // An unreadable cache should not prevent the first public GET.
+      } catch (error) {
+        diagnostics.record(
+          DiagnosticModule.cache,
+          DiagnosticStage.read,
+          error: error,
+        );
       }
     }
-    if (!ref.mounted) return;
+    if (!current()) return;
     final now = clock().toUtc();
     final previous = state.snapshot;
     final previousAttempt = _lastAttempt;
@@ -72,13 +98,18 @@ class Classrooms extends Notifier<ClassroomsState> {
     _lastAttempt = now;
     state = ClassroomsState(snapshot: previous, isLoading: true);
 
-    final response = await _fetch(force || newDay, previous);
-    if (!ref.mounted) return;
+    final response = await _fetch(
+      force || newDay || previousAttempt != null,
+      previous,
+    );
+    if (!current()) return;
     if (response == null) {
+      _consecutiveFailures = (_consecutiveFailures + 1).clamp(0, 4);
       state = ClassroomsState(snapshot: previous, refreshFailed: true);
       return;
     }
     final (snapshot, payload, headers, notModified) = response;
+    _consecutiveFailures = 0;
     final checkedAt = clock().toUtc();
     final cacheControl =
         headers['cache-control'] ??
@@ -100,13 +131,16 @@ class Classrooms extends Notifier<ClassroomsState> {
     _lastAttempt = checkedAt;
     state = ClassroomsState(snapshot: snapshot);
     try {
-      if (noStore) {
-        await cache.removeWeek();
-      } else {
-        await cache.writeWeek(entry);
-      }
-    } catch (_) {
-      // Keep the validated response available in memory if SQLite fails.
+      await _writes.write(
+        version,
+        () => noStore ? cache.removeWeek() : cache.writeWeek(entry),
+      );
+    } catch (error) {
+      diagnostics.record(
+        DiagnosticModule.cache,
+        DiagnosticStage.write,
+        error: error,
+      );
     }
   }
 
@@ -127,17 +161,25 @@ class Classrooms extends Notifier<ClassroomsState> {
       final body = response.body;
       if (body == null) {
         final cached = _cached;
-        if (cached == null || previous == null) return null;
+        if (cached == null || previous == null) {
+          throw const FormatException('缺少空教室缓存');
+        }
         return (previous, cached.payload, response.headers, true);
       }
       final parsed = readClassroomWeek(body);
       if (previous != null &&
           parsed.generatedAt.isBefore(previous.generatedAt)) {
-        return null;
+        throw const FormatException('空教室快照早于当前数据');
       }
       return (parsed, body, response.headers, false);
-    } catch (_) {
-      // A request or decoding failure leaves the previous validated week intact.
+    } catch (error) {
+      diagnostics.record(
+        DiagnosticModule.publicData,
+        error is FormatException
+            ? DiagnosticStage.decode
+            : DiagnosticStage.request,
+        error: error,
+      );
       return null;
     }
   }
@@ -151,9 +193,11 @@ class Classrooms extends Notifier<ClassroomsState> {
     if (previousAttempt == null || newDay || now.isBefore(previousAttempt)) {
       return true;
     }
-    final freshUntil = _cached?.freshUntil;
-    if (freshUntil != null && now.isBefore(freshUntil)) return false;
-    if (now.difference(previousAttempt) >= _refreshInterval) return true;
+    final elapsed = now.difference(previousAttempt);
+    if (_consecutiveFailures > 0) {
+      return elapsed >= Duration(minutes: 1 << (_consecutiveFailures - 1));
+    }
+    if (elapsed >= refreshInterval) return true;
     // A slot expiring since the last check makes an early revalidation useful.
     final today = campusDateAt(now);
     return previous?.days.entries.any(

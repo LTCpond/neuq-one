@@ -5,6 +5,9 @@ outputs:
   apksigner:
     description: Path to apksigner from the configured Android Build Tools.
     value: ${{ steps.sdk-packages.outputs.apksigner }}
+  aapt2:
+    description: Path to aapt2 from the configured Android Build Tools.
+    value: ${{ steps.sdk-packages.outputs.aapt2 }}
 
 runs:
   using: composite
@@ -53,3 +56,4 @@ runs:
           "ndk;28.2.13676358" \
           "cmake;3.22.1"
         echo "apksigner=$ANDROID_HOME/build-tools/$ANDROID_BUILD_TOOLS_VERSION/apksigner" >> "$GITHUB_OUTPUT"
+        echo "aapt2=$ANDROID_HOME/build-tools/$ANDROID_BUILD_TOOLS_VERSION/aapt2" >> "$GITHUB_OUTPUT"

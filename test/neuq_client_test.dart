@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -9,7 +10,7 @@ import 'package:http/testing.dart';
 import 'package:neuq_one/core/auth/neuq_login_protocol.dart';
 import 'package:neuq_one/core/auth/school_auth.dart';
 import 'package:neuq_one/core/network/neuq_client.dart'
-    show NeuqClient, NeuqPage;
+    show NeuqClient, NeuqPage, SchoolSessionHealth, SchoolSessionStatus;
 import 'package:pointycastle/export.dart';
 
 const _account = NeuqCredentials('00001234', 'synthetic-password');
@@ -26,15 +27,18 @@ void main() {
   late _School school;
   late NeuqClient client;
   NeuqCredentials? remembered;
+  late List<SchoolSessionStatus> sessionStatuses;
 
   setUp(() {
     remembered = null;
+    sessionStatuses = [];
     school = _School();
     client = NeuqClient(
       readRemembered: (subject) async =>
           subject == _subject ? remembered : null,
       forgetRemembered: (_) async => remembered = null,
       createClient: () => MockClient(school.handle),
+      onSessionStatus: sessionStatuses.add,
     );
   });
 
@@ -69,6 +73,33 @@ void main() {
       'grade data',
     );
     expect(school.loginAttempts, 2);
+    expect(sessionStatuses.map((status) => status.health), [
+      SchoolSessionHealth.connected,
+      SchoolSessionHealth.restoring,
+      SchoolSessionHealth.restoring,
+      SchoolSessionHealth.connected,
+    ]);
+  });
+
+  test('disconnect suppresses an academic result already in flight', () async {
+    await client.signIn(_account, onVerified: (_) async {});
+    final started = Completer<void>();
+    final finish = Completer<String>();
+    final read = client.read(_subject, (_) {
+      started.complete();
+      return finish.future;
+    });
+    await started.future;
+    final disconnect = client.disconnect(() async {});
+    final failure = expectLater(read, throwsA(SchoolRequestFailure.expired));
+    finish.complete('synthetic test result');
+    await failure;
+    await disconnect;
+    expect(sessionStatuses.last, (
+      subject: null,
+      health: SchoolSessionHealth.unknown,
+    ));
+    expect(sessionStatuses, hasLength(2));
   });
 
   test(
@@ -187,6 +218,10 @@ void main() {
       );
       final repository = scope.read(schoolAuthRepositoryProvider);
       expect((await repository.restoreSession())?.subject, _subject);
+      expect(
+        await scope.read(schoolConnectionProvider.future),
+        SchoolConnection.unknown,
+      );
       expect(await repository.hasRememberedPassword(_subject), isFalse);
       await repository.signIn(_account, rememberPassword: true);
       expect(await repository.hasRememberedPassword(_subject), isTrue);
@@ -200,6 +235,10 @@ void main() {
       );
       final newRepository = afterRestart.read(schoolAuthRepositoryProvider);
       expect((await newRepository.restoreSession())?.subject, _subject);
+      expect(
+        await afterRestart.read(schoolConnectionProvider.future),
+        SchoolConnection.unknown,
+      );
       final newClient = afterRestart.read(neuqClientProvider);
       expect(
         await newClient.read(
@@ -209,6 +248,24 @@ void main() {
         'grade data',
       );
       expect(school.loginAttempts, 2);
+      expect(
+        await afterRestart.read(schoolConnectionProvider.future),
+        SchoolConnection.connected,
+      );
+      await expectLater(
+        newClient.read<void>(_subject, (_) async {
+          throw SchoolRequestFailure.unavailable;
+        }),
+        throwsA(SchoolRequestFailure.unavailable),
+      );
+      expect(
+        await afterRestart.read(schoolConnectionProvider.future),
+        SchoolConnection.offline,
+      );
+      expect(
+        (await afterRestart.read(schoolSessionProvider.future))?.subject,
+        _subject,
+      );
 
       await newRepository.forgetPassword(_subject);
       expect(await newRepository.hasRememberedPassword(_subject), isFalse);
@@ -223,6 +280,14 @@ void main() {
         throwsA(SchoolRequestFailure.expired),
       );
       expect(school.loginAttempts, 2);
+      expect(
+        await afterRestart.read(schoolConnectionProvider.future),
+        SchoolConnection.expired,
+      );
+      expect(
+        (await afterRestart.read(schoolSessionProvider.future))?.subject,
+        _subject,
+      );
     },
   );
 }

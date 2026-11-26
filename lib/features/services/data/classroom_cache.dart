@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:drift/drift.dart';
 import 'package:drift_flutter/drift_flutter.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -33,6 +35,14 @@ class ClassroomCache extends _$ClassroomCache {
 
   Future<void> writeWeek(ClassroomCacheEntry entry) async {
     await into(classroomCacheEntries).insertOnConflictUpdate(entry);
+  }
+
+  Future<int> cacheBytes() async {
+    final row = await readWeek();
+    if (row == null) return 0;
+    return [row.payload, row.etag, row.lastModified, row.cacheControl]
+        .whereType<String>()
+        .fold<int>(0, (sum, value) => sum + utf8.encode(value).length);
   }
 
   Future<void> removeWeek() async {

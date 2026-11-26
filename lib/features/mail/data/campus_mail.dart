@@ -4,6 +4,9 @@ import 'dart:typed_data' show BytesBuilder;
 
 import 'package:enough_mail/enough_mail.dart';
 import 'package:file_picker/file_picker.dart';
+
+import '../../../core/storage/picker_cache.dart';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
@@ -201,10 +204,12 @@ class CampusMailRepository {
       }
       return bytes;
     });
-    return await FilePicker.saveFile(
-          fileName: _fileName(attachment.name),
-          bytes: bytes,
-          dialogTitle: '保存邮件附件',
+    return await pickerCache.run(
+          () => FilePicker.saveFile(
+            fileName: _fileName(attachment.name),
+            bytes: bytes,
+            dialogTitle: '保存邮件附件',
+          ),
         ) !=
         null;
   }
@@ -396,7 +401,7 @@ String _fileName(String name) {
 }
 
 Future<List<PlatformFile>> pickMailAttachments() =>
-    FilePicker.pickFiles(dialogTitle: '选择邮件附件');
+    pickerCache.run(() => FilePicker.pickFiles(dialogTitle: '选择邮件附件'));
 
 List<MailAddress> _recipients(String value) {
   if (value.trim().isEmpty) return [];

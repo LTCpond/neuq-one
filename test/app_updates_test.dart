@@ -7,6 +7,12 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:material_ui/material_ui.dart';
+import 'package:drift/native.dart';
+import 'package:neuq_one/app/app.dart';
+import 'package:neuq_one/app/router.dart';
+import 'package:neuq_one/app/login_page.dart';
+import 'package:neuq_one/core/database/app_database.dart';
+import 'package:neuq_one/core/database/school_data.dart';
 import 'package:neuq_one/core/auth/school_auth.dart';
 import 'package:neuq_one/core/network/public_data_client.dart';
 import 'package:neuq_one/core/storage/settings.dart';
@@ -14,6 +20,7 @@ import 'package:neuq_one/core/theme/app_theme.dart';
 import 'package:neuq_one/features/profile/data/app_updates.dart';
 import 'package:neuq_one/features/profile/data/course_reminders.dart';
 import 'package:neuq_one/features/profile/presentation/profile_page.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -60,6 +67,371 @@ void main() {
     }
   });
 
+  test('automatic checks persist success and back off errors; manual bypasses both', () async {
+    final prefs = _UpdatePreferences();
+    var now = DateTime.utc(2026, 11, 26);
+    var requests = 0;
+    var networkAvailable = false;
+    final client = MockClient((_) async {
+      requests++;
+      return networkAvailable ? _manifest(null) : http.Response('', 503);
+    });
+    addTearDown(client.close);
+    AppUpdateCoordinator launch() => AppUpdateCoordinator(
+      AppUpdatesRepository(PublicDataClient(client)),
+      prefs,
+      clock: () => now,
+    );
+    await expectLater(
+      launch().check(automatic: true),
+      throwsA(isA<Exception>()),
+    );
+    now = now.add(const Duration(minutes: 59));
+    expect(await launch().check(automatic: true), isNull);
+    expect(requests, 1);
+    now = now.add(const Duration(minutes: 1));
+    await expectLater(
+      launch().check(automatic: true),
+      throwsA(isA<Exception>()),
+    );
+    now = now.add(const Duration(minutes: 119));
+    expect(await launch().check(automatic: true), isNull);
+    expect(requests, 2);
+    now = now.add(const Duration(minutes: 1));
+    networkAvailable = true;
+    expect(await launch().check(automatic: true), isA<NoPublishedAppRelease>());
+    now = now.add(const Duration(hours: 23, minutes: 59));
+    expect(await launch().check(automatic: true), isNull);
+    expect(
+      await launch().check(automatic: false),
+      isA<NoPublishedAppRelease>(),
+    );
+    expect(requests, 4);
+    now = now.add(const Duration(hours: 24));
+    expect(await launch().check(automatic: true), isA<NoPublishedAppRelease>());
+    expect(requests, 5);
+  });
+
+  test(
+    'rewinding the clock reanchors the stored interval across restarts',
+    () async {
+      final prefs = _UpdatePreferences();
+      var now = DateTime.utc(2026, 11, 26);
+      var requests = 0;
+      final client = MockClient((_) async {
+        requests++;
+        return _manifest(null);
+      });
+      addTearDown(client.close);
+      AppUpdateCoordinator launch() => AppUpdateCoordinator(
+        AppUpdatesRepository(PublicDataClient(client)),
+        prefs,
+        clock: () => now,
+      );
+      await launch().checkAtStartup();
+      now = now.subtract(const Duration(days: 5));
+      expect(await launch().checkAtStartup(), isNull);
+      now = now.add(const Duration(hours: 24));
+      expect(await launch().checkAtStartup(), isA<NoPublishedAppRelease>());
+      expect(requests, 2);
+    },
+  );
+
+  test('manual and automatic share one request and a manual action owns presentation', () async {
+    final prefs = _UpdatePreferences();
+    final finish = Completer<http.Response>();
+    var requests = 0;
+    final client = MockClient((_) {
+      requests++;
+      return finish.future;
+    });
+    addTearDown(client.close);
+    final coordinator = AppUpdateCoordinator(
+      AppUpdatesRepository(PublicDataClient(client)),
+      prefs,
+    );
+    final startup = coordinator.checkAtStartup();
+    expect(coordinator.checkAtStartup(), same(startup));
+    final manual = coordinator.check(automatic: false);
+    expect(coordinator.beginPresentation(), isTrue);
+    expect(coordinator.beginPresentation(), isFalse);
+    finish.complete(_manifest(_release(latest)));
+    expect(await startup, same(await manual));
+    expect(requests, 1);
+    await coordinator.presentAutomatically(
+      canShow: () => true,
+      show: (_, _) async {
+        fail('a second presentation must not start');
+      },
+    );
+    await coordinator.noteManualPresentation(latest);
+    coordinator.endPresentation();
+    expect(prefs.values['appUpdates.lastPromptedVersion'], latest);
+    expect(
+      await coordinator.check(automatic: false),
+      isA<AppUpdateAvailable>(),
+    );
+    expect(requests, 2);
+  });
+
+  test('restores offers, preserves them on failure and clears on withdrawal or upgrade', () async {
+    final prefs = _UpdatePreferences();
+    var response = _manifest(_release(latest, changelog: ['更新摘要']));
+    final client = MockClient((_) async => response);
+    addTearDown(client.close);
+    final repository = AppUpdatesRepository(PublicDataClient(client));
+    AppUpdateCoordinator launch() => AppUpdateCoordinator(repository, prefs);
+    await launch().checkAtStartup();
+    final offline = launch();
+    await offline.restore();
+    expect(offline.available?.changelog, ['更新摘要']);
+    response = http.Response('', 503);
+    await expectLater(
+      offline.check(automatic: false),
+      throwsA(isA<Exception>()),
+    );
+    expect(offline.available?.latestVersion, latest);
+    response = _manifest(null);
+    expect(await offline.check(automatic: false), isA<NoPublishedAppRelease>());
+    expect(offline.available, isNull);
+    final withdrawn = launch();
+    await withdrawn.restore();
+    expect(withdrawn.available, isNull);
+    response = _manifest(_release(latest));
+    await launch().check(automatic: false);
+    messenger.setMockMethodCallHandler(channel, (_) async => latest);
+    final upgraded = launch();
+    await upgraded.restore();
+    expect(upgraded.available, isNull);
+    expect(
+      prefs.values['appUpdates.state.v1'],
+      isNot(contains(_releaseUrl(latest))),
+    );
+  });
+
+  test('restores the existing ignored version and handles storage failure without popups', () async {
+    var failPromptWrite = false;
+    final prefs = _UpdatePreferences(
+      onPromptWrite: () {
+        if (failPromptWrite) throw StateError('storage failed');
+      },
+    );
+    prefs.values['appUpdates.ignoredVersion'] = latest;
+    final client = MockClient((_) async => _manifest(_release(latest)));
+    addTearDown(client.close);
+    AppUpdateCoordinator launch() => AppUpdateCoordinator(
+      AppUpdatesRepository(PublicDataClient(client)),
+      prefs,
+    );
+    final migrated = launch();
+    await migrated.checkAtStartup();
+    Future<void> unexpected(AppUpdateAvailable _, VoidCallback _) async =>
+        fail('unexpected popup');
+    await migrated.presentAutomatically(canShow: () => true, show: unexpected);
+    prefs.values.remove('appUpdates.ignoredVersion');
+    failPromptWrite = true;
+    for (var i = 0; i < 2; i++) {
+      final restarted = launch();
+      await restarted.checkAtStartup();
+      expect(restarted.available?.latestVersion, latest);
+      await restarted.presentAutomatically(
+        canShow: () => true,
+        show: unexpected,
+      );
+    }
+  });
+
+  test(
+    'an unsafe route during durable preparation leaves the version eligible',
+    () async {
+      var safe = true;
+      var interrupt = true;
+      final prefs = _UpdatePreferences(
+        onPromptWrite: () {
+          if (interrupt) safe = false;
+        },
+      );
+      final client = MockClient((_) async => _manifest(_release(latest)));
+      addTearDown(client.close);
+      final coordinator = AppUpdateCoordinator(
+        AppUpdatesRepository(PublicDataClient(client)),
+        prefs,
+      );
+      await coordinator.checkAtStartup();
+      await coordinator.presentAutomatically(
+        canShow: () => safe,
+        show: (_, _) async {
+          fail('presentation must recheck the route after writing');
+        },
+      );
+      expect(prefs.values['appUpdates.lastPromptedVersion'], isNull);
+      interrupt = false;
+      safe = true;
+      await coordinator.presentAutomatically(
+        canShow: () => safe,
+        show: (_, shown) async => shown(),
+      );
+      expect(prefs.values['appUpdates.lastPromptedVersion'], latest);
+    },
+  );
+
+  testWidgets(
+    'startup defers the offer during login and shows it after authentication',
+    (tester) async {
+      final pending = Completer<http.Response>();
+      final client = MockClient((_) => pending.future);
+      final prefs = _UpdatePreferences();
+      final auth = _UpdateAuth(session: null);
+      final scope = await _mountApp(tester, client, prefs, auth: auth);
+      expect(find.byType(LoginPage), findsOneWidget);
+      expect(find.text('正在恢复登录状态'), findsNothing);
+      pending.complete(_manifest(_release(latest)));
+      await tester.pumpAndSettle();
+      expect(find.byType(AlertDialog), findsNothing);
+      expect(prefs.values['appUpdates.lastPromptedVersion'], isNull);
+      await scope
+          .read(schoolSessionProvider.notifier)
+          .signIn(
+            const NeuqCredentials('fixture', 'fixture'),
+            rememberPassword: false,
+          );
+      await tester.pumpAndSettle();
+      expect(find.text('发现新版本'), findsOneWidget);
+      await tester.tap(find.text('稍后更新'));
+      await tester.pumpAndSettle();
+      expect(find.byType(AlertDialog), findsNothing);
+      expect(prefs.values['appUpdates.lastPromptedVersion'], latest);
+    },
+  );
+
+  for (final dismiss in ['later', 'download', 'back', 'barrier']) {
+    testWidgets(
+      'automatic popup after $dismiss remains suppressed across restart',
+      (tester) async {
+        final prefs = _UpdatePreferences();
+        var now = DateTime.utc(2026, 11, 26);
+        var version = latest;
+        var requests = 0;
+        final db = AppDatabase(NativeDatabase.memory());
+        addTearDown(db.close);
+        final downloads = <MethodCall>[];
+        const browser = MethodChannel('plugins.flutter.io/url_launcher');
+        messenger.setMockMethodCallHandler(browser, (call) async {
+          downloads.add(call);
+          return true;
+        });
+        addTearDown(() => messenger.setMockMethodCallHandler(browser, null));
+        Future<ProviderContainer> launch() => _mountApp(
+          tester,
+          MockClient((_) async {
+            requests++;
+            return _manifest(_release(version, changelog: ['修复测试功能']));
+          }),
+          prefs,
+          clock: () => now,
+          database: db,
+        );
+        final first = await launch();
+        expect(find.text('发现新版本'), findsOneWidget);
+        expect(find.text('修复测试功能'), findsOneWidget);
+        switch (dismiss) {
+          case 'later':
+            await tester.tap(find.text('稍后更新'));
+          case 'download':
+            await tester.tap(find.text('前往下载'));
+          case 'back':
+            await tester.binding.handlePopRoute();
+          case 'barrier':
+            await tester.tapAt(const Offset(8, 8));
+        }
+        await tester.pumpAndSettle();
+        expect(find.byType(AlertDialog), findsNothing);
+        if (dismiss == 'download') {
+          expect(
+            downloads.single.arguments,
+            containsPair('url', _releaseUrl(latest)),
+          );
+        }
+        first.read(routerProvider).go('/profile');
+        await tester.pumpAndSettle();
+        expect(find.text('v$latest 可用'), findsOneWidget);
+        expect(requests, 1);
+        await tester.pumpWidget(const SizedBox.shrink());
+        await tester.pumpAndSettle();
+        now = now.add(const Duration(hours: 25));
+        final second = await launch();
+        expect(find.byType(AlertDialog), findsNothing);
+        expect(requests, 2);
+        second.read(routerProvider).go('/profile');
+        await tester.pumpAndSettle();
+        expect(find.text('v$latest 可用'), findsOneWidget);
+        if (dismiss == 'later') {
+          await tester.ensureVisible(find.text('检查更新'));
+          await tester.pumpAndSettle();
+          await tester.tap(find.text('检查更新'));
+          await tester.pumpAndSettle();
+          expect(find.text('发现新版本'), findsOneWidget);
+          expect(find.text('修复测试功能'), findsOneWidget);
+          await tester.tap(find.text('稍后更新'));
+          await tester.pumpAndSettle();
+          await tester.pumpWidget(const SizedBox.shrink());
+          await tester.pumpAndSettle();
+          version = '0.11.0';
+          now = now.add(const Duration(hours: 25));
+          await launch();
+          expect(find.text('发现新版本'), findsOneWidget);
+          expect(find.text('最新版本：v0.11.0'), findsOneWidget);
+        }
+      },
+    );
+  }
+
+  testWidgets(
+    'automatic prompt waits for foreground and an open branch dialog',
+    (tester) async {
+      final pending = Completer<http.Response>();
+      final prefs = _UpdatePreferences();
+      final scope = await _mountApp(
+        tester,
+        MockClient((_) => pending.future),
+        prefs,
+      );
+      scope.read(routerProvider).go('/profile');
+      await tester.pumpAndSettle();
+      unawaited(
+        showDialog<void>(
+          context: tester.element(find.byType(ProfilePage)),
+          useRootNavigator: false,
+          builder: (context) => AlertDialog(
+            title: const Text('正在办理'),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('结束办理'),
+              ),
+            ],
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+      pending.complete(_manifest(_release(latest)));
+      await tester.pumpAndSettle();
+      expect(find.text('发现新版本'), findsNothing);
+      expect(prefs.values['appUpdates.lastPromptedVersion'], isNull);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      await tester.pumpAndSettle();
+      expect(find.text('发现新版本'), findsNothing);
+      await tester.tap(find.text('结束办理'));
+      await tester.pumpAndSettle();
+      expect(find.text('发现新版本'), findsOneWidget);
+    },
+  );
+
   test('a manifest without a published release has its own result', () async {
     messenger.setMockMethodCallHandler(channel, null);
     expect(
@@ -75,6 +447,137 @@ void main() {
       throwsFormatException,
     );
   });
+
+  test('stable sees only stable, beta chooses the highest version and accepts old manifests', () async {
+    Future<AppUpdateResult> check(
+      Object? stable,
+      Object? beta,
+      AppUpdateChannel channel,
+    ) async {
+      final client = MockClient(
+        (_) async => _manifest(stable, prerelease: beta),
+      );
+      addTearDown(client.close);
+      return AppUpdatesRepository(
+        PublicDataClient(client),
+        channel: channel,
+      ).checkForUpdate();
+    }
+
+    const beta = AppUpdateChannel.beta;
+    const stable = AppUpdateChannel.stable;
+    final preview = _release('1.0.0', prerelease: true);
+    expect(await check(null, preview, stable), isA<NoPublishedAppRelease>());
+    final betaResult =
+        await check(_release(latest), preview, beta) as AppUpdateAvailable;
+    expect(betaResult.latestVersion, '1.0.0');
+    expect(betaResult.prerelease, isTrue);
+    final stableResult =
+        await check(_release(latest), preview, stable) as AppUpdateAvailable;
+    expect(stableResult.latestVersion, latest);
+    expect(stableResult.prerelease, isFalse);
+    final tied =
+        await check(_release('1.0.0'), preview, beta) as AppUpdateAvailable;
+    expect(tied.prerelease, isFalse);
+    expect(
+      await check(null, _release('0.8.0', prerelease: true), beta),
+      isA<AppUpToDate>(),
+    );
+    for (final invalid in ['1.01.0', '1.0.0-rc.1', '1.0.0\n']) {
+      await expectLater(
+        check(_release(invalid), preview, beta),
+        throwsFormatException,
+      );
+    }
+    await expectLater(check(preview, null, stable), throwsFormatException);
+    await expectLater(
+      check(null, _release(latest), beta),
+      throwsFormatException,
+    );
+    final older =
+        await check(_release(latest), null, stable) as AppUpdateAvailable;
+    expect(older.changelog, isEmpty);
+  });
+
+  test(
+    'bounds response size, count and Unicode length of optional changelog',
+    () async {
+      final emoji = List.filled(180, '📚').join();
+      final result =
+          await repository(
+                _release(
+                  latest,
+                  changelog: [
+                    emoji,
+                    500,
+                    '  ',
+                    '<script>示例</script>',
+                    '三',
+                    '四',
+                    '五',
+                    '六',
+                  ],
+                ),
+              ).checkForUpdate()
+              as AppUpdateAvailable;
+      expect(result.changelog, hasLength(5));
+      expect(result.changelog.first.runes, hasLength(160));
+      expect(result.changelog[1], '<script>示例</script>');
+      final over = List.filled(17000, 'x').join();
+      await expectLater(
+        repository(_release(latest, changelog: [over])).checkForUpdate(),
+        throwsFormatException,
+      );
+    },
+  );
+
+  testWidgets(
+    'beta summary scrolls and stays usable with larger text on a small dark screen',
+    (tester) async {
+      final lines = List.generate(
+        5,
+        (i) => '改进 $i ${List.filled(140, '课').join()}',
+      );
+      await _mountProfile(
+        tester,
+        Brightness.dark,
+        MockClient(
+          (_) async => _manifest(
+            null,
+            prerelease: _release(latest, prerelease: true, changelog: lines),
+          ),
+        ),
+        size: const Size(320, 500),
+        textScale: 1.6,
+      );
+      final update = find.text('检查更新');
+      await tester.ensureVisible(update);
+      await tester.pumpAndSettle();
+      await tester.tap(update);
+      await tester.pumpAndSettle();
+      final dialog = find.byType(AlertDialog);
+      expect(
+        find.descendant(
+          of: dialog,
+          matching: find.text('NEUQ One v$latest 公测版'),
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(of: dialog, matching: find.text('本次更新')),
+        findsOneWidget,
+      );
+      final change = find.text(lines.last);
+      await tester.ensureVisible(change);
+      await tester.pumpAndSettle();
+      expect(change, findsOneWidget);
+      expect(find.text('前往下载').hitTestable(), findsOneWidget);
+      expect(tester.takeException(), isNull);
+      await tester.tap(find.text('稍后更新'));
+      await tester.pumpAndSettle();
+      expect(find.text('v$latest 可用'), findsOneWidget);
+    },
+  );
 
   testWidgets(
     'profile checks directly, prevents duplicate checks and opens the release',
@@ -130,8 +633,17 @@ void main() {
       expect(close, findsOneWidget);
       expect(
         find.descendant(of: dialog, matching: find.byType(TextButton)),
-        findsOneWidget,
+        findsNWidgets(3),
       );
+      await tester.tap(find.text('问题反馈'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('参与贡献'));
+      await tester.pumpAndSettle();
+      expect(launches.map((call) => (call.arguments as Map)['url']), [
+        'https://github.com/LTCpond/neuq-one/issues',
+        'https://github.com/LTCpond/neuq-one/pulls',
+      ]);
+      launches.clear();
       await tester.tap(close);
       await tester.pumpAndSettle();
       expect(requests, 0);
@@ -152,13 +664,12 @@ void main() {
       expect(progress, findsNothing);
       expect(find.text('发现新版本'), findsOneWidget);
       expect(
-        find.descendant(
-          of: dialog,
-          matching: find.text('当前版本 v$installed\n最新版本 v$latest'),
-        ),
+        find.descendant(of: dialog, matching: find.text('最新版本：v$latest')),
         findsOneWidget,
       );
-      await tester.tap(find.text('前往 GitHub 下载'));
+      expect(find.text('当前版本：v$installed'), findsOneWidget);
+      expect(find.text('本次更新'), findsNothing);
+      await tester.tap(find.text('前往下载'));
       await tester.pumpAndSettle();
       expect(dialog, findsNothing);
       expect(launches.single.method, 'launch');
@@ -209,36 +720,124 @@ void main() {
 String _releaseUrl(String version) =>
     'https://github.com/LTCpond/neuq-one/releases/tag/v$version';
 
-Map<String, String> _release(String version) => {
+Map<String, Object> _release(
+  String version, {
+  bool? prerelease,
+  List<Object>? changelog,
+}) => {
   'version': version,
   'url': _releaseUrl(version),
+  'prerelease': ?prerelease,
+  'changelog': ?changelog,
 };
 
-http.Response _manifest(Object? release) =>
-    http.Response(jsonEncode({'schemaVersion': 1, 'release': release}), 200);
+http.Response _manifest(Object? release, {Object? prerelease}) =>
+    http.Response.bytes(
+      utf8.encode(
+        jsonEncode({
+          'schemaVersion': 1,
+          'release': release,
+          'prerelease': ?prerelease,
+        }),
+      ),
+      200,
+    );
+
+Future<ProviderContainer> _mountApp(
+  WidgetTester tester,
+  MockClient client,
+  _UpdatePreferences prefs, {
+  _UpdateAuth? auth,
+  DateTime Function()? clock,
+  AppDatabase? database,
+}) async {
+  addTearDown(client.close);
+  final db = database ?? AppDatabase(NativeDatabase.memory());
+  if (database == null) addTearDown(db.close);
+  final scope = ProviderContainer.test(
+    overrides: [
+      settingsProvider.overrideWith(_TestSettings.new),
+      preferencesProvider.overrideWithValue(prefs),
+      schoolAuthRepositoryProvider.overrideWithValue(auth ?? _UpdateAuth()),
+      schoolDataSourceProvider.overrideWithValue(null),
+      databaseProvider.overrideWithValue(db),
+      reminderSyncProvider.overrideWith(
+        (ref) async => const ReminderStatus(ReminderCondition.off),
+      ),
+      publicDataClientProvider.overrideWithValue(PublicDataClient(client)),
+      if (clock != null)
+        appUpdateCoordinatorProvider.overrideWith(
+          (ref) => AppUpdateCoordinator(
+            ref.read(appUpdatesProvider),
+            prefs,
+            clock: clock,
+          ),
+        ),
+    ],
+  );
+  await tester.pumpWidget(
+    UncontrolledProviderScope(container: scope, child: const NeuqOneApp()),
+  );
+  await tester.pumpAndSettle();
+  return scope;
+}
+
+class _UpdateAuth implements SchoolAuthRepository {
+  _UpdateAuth({this.session = _verified});
+  static const _verified = SchoolSession(subject: 'fixture-update-account');
+  final SchoolSession? session;
+  @override
+  bool get available => true;
+  @override
+  bool get canRememberPassword => false;
+  @override
+  Future<SchoolSession?> restoreSession() async => session;
+  @override
+  Future<SchoolSession> signIn(
+    NeuqCredentials credentials, {
+    required bool rememberPassword,
+    String? expectedSubject,
+  }) async => _verified;
+  @override
+  Future<bool> hasRememberedPassword(String subject) async => false;
+  @override
+  Future<void> forgetPassword(String subject) async {}
+  @override
+  Future<void> disconnect() async {}
+}
 
 Future<void> _mountProfile(
   WidgetTester tester,
   Brightness brightness,
-  MockClient client,
-) async {
+  MockClient client, {
+  Size size = const Size(390, 700),
+  double textScale = 1,
+}) async {
   addTearDown(client.close);
-  tester.view.physicalSize = const Size(390, 700);
+  tester.view.physicalSize = size;
   tester.view.devicePixelRatio = 1;
   addTearDown(tester.view.reset);
   await tester.pumpWidget(
     ProviderScope(
       overrides: [
         settingsProvider.overrideWith(_TestSettings.new),
+        preferencesProvider.overrideWithValue(_UpdatePreferences()),
         schoolConnectionProvider.overrideWith(
           (ref) async => SchoolConnection.disconnected,
         ),
         rememberedSchoolPasswordProvider.overrideWith((ref) async => false),
-        reminderSyncProvider.overrideWith((ref) async {}),
+        reminderSyncProvider.overrideWith(
+          (ref) async => const ReminderStatus(ReminderCondition.off),
+        ),
         publicDataClientProvider.overrideWithValue(PublicDataClient(client)),
       ],
       child: MaterialApp(
         theme: appTheme(brightness),
+        builder: (context, child) => MediaQuery(
+          data: MediaQuery.of(context)
+              .copyWith(textScaler: TextScaler.linear(textScale)),
+          child: child!,
+        ),
         home: const ProfilePage(),
       ),
     ),
@@ -249,4 +848,35 @@ Future<void> _mountProfile(
 class _TestSettings extends SettingsController {
   @override
   Future<AppSettings> build() async => const AppSettings();
+}
+
+class _UpdatePreferences implements SharedPreferencesAsync {
+  _UpdatePreferences({this.onPromptWrite});
+
+  final values = <String, Object>{};
+  final VoidCallback? onPromptWrite;
+  @override
+  Future<int?> getInt(String key) async => values[key] as int?;
+  @override
+  Future<String?> getString(String key) async => values[key] as String?;
+  @override
+  Future<void> setInt(String key, int value) async {
+    values[key] = value;
+  }
+
+  @override
+  Future<void> remove(String key) async {
+    values.remove(key);
+  }
+
+  @override
+  Future<void> setString(String key, String value) async {
+    if (key == 'appUpdates.lastPromptedVersion') {
+      onPromptWrite?.call();
+    }
+    values[key] = value;
+  }
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }

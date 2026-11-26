@@ -6,6 +6,8 @@ import '../../features/grades/domain/grades.dart';
 import '../../features/timetable/domain/timetable.dart';
 import '../auth/neuq_login_protocol.dart';
 import '../auth/school_auth.dart';
+import '../diagnostics/diagnostics.dart';
+import '../network/neuq_client.dart' show schoolFailureCode;
 import '../time/campus_clock.dart';
 import '../time/neuq_periods.dart';
 import 'app_database.dart';
@@ -72,9 +74,21 @@ class SchoolDataRepository {
   Future<void> refresh(SchoolDataSet section, SchoolDataSource source) =>
       _inFlight.putIfAbsent(
         section,
-        () => _refresh(section, source).whenComplete(() {
-          _inFlight.remove(section);
-        }),
+        () => _refresh(section, source)
+            .onError<Object>((error, stack) {
+              diagnostics.record(
+                DiagnosticModule.academics,
+                DiagnosticStage.sync,
+                code: error is SchoolRequestFailure
+                    ? schoolFailureCode(error)
+                    : null,
+                error: error,
+              );
+              Error.throwWithStackTrace(error, stack);
+            })
+            .whenComplete(() {
+              _inFlight.remove(section);
+            }),
       );
 
   Future<void> _refresh(SchoolDataSet section, SchoolDataSource source) async {

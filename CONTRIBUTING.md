@@ -23,6 +23,8 @@ flutter test
 
 提交说明应描述用户遇到的问题、修改后的行为和已运行的验证。涉及界面的修改可附使用虚构数据的截图；涉及校园系统的修改应说明真机验证情况。
 
+涉及 Android 通知时，使用 `verify_notifications.py` 检查 APK 内实际打包的图标和合并 Manifest，并分别记录 Android 13+ 通知授权、精确闹钟授权、非精确模式、重启和覆盖安装的设备验收结果。[Android 签名与 APK 检查](docs/android-signing.md)
+
 ## 资源与依赖
 
 原始图标位于 `assets/branding/app_icon.png`。Android 自适应图标使用额外内边距抵消系统裁切，修改图标时保留原图留白；iOS 图标须使用无 alpha 通道的 PNG。

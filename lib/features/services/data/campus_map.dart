@@ -7,6 +7,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path_provider/path_provider.dart';
 
 import '../../../core/network/public_data_client.dart';
+import '../../../core/diagnostics/diagnostics.dart';
+import '../../../core/storage/cache_files.dart';
 
 final campusMapRepositoryProvider = Provider<CampusMapRepository>(
   (ref) => CampusMapRepository(
@@ -38,14 +40,48 @@ class CampusMapRepository {
   final PublicDataClient _client;
   final Future<Directory> Function() _directory;
   Future<CampusMap>? _inFlight;
+  final _writes = CacheWrites();
+
+  Future<List<FileSystemEntity>> _cacheFiles() async {
+    final directory = await _directory();
+    if (!await directory.exists()) return [];
+    return directory.list(followLinks: false).where((entity) {
+      final name = entity.uri.pathSegments
+          .where((part) => part.isNotEmpty)
+          .last;
+      return name == _fileName || name.startsWith('neuq_one_campus_map-');
+    }).toList();
+  }
+
+  Future<int> cacheBytes() async =>
+      (await Future.wait((await _cacheFiles()).map(cacheFileBytes)))
+          .fold<int>(0, (sum, bytes) => sum + bytes);
+
+  Future<void> clearCache() {
+    final clearing = _writes.clear(() async {
+      await Future.wait((await _cacheFiles()).map(deleteCacheEntity));
+    });
+    _inFlight = null;
+    return clearing;
+  }
 
   Stream<CampusMap> load() async* {
+    final version = _writes.version;
     final cached = await readCached();
+    if (!_writes.current(version)) return;
     if (cached != null) yield cached;
     try {
+      if (!_writes.current(version)) return;
       final updated = await refresh(cached);
-      if (!identical(updated, cached)) yield updated;
-    } catch (_) {
+      if (_writes.current(version) && !identical(updated, cached)) {
+        yield updated;
+      }
+    } catch (error) {
+      diagnostics.record(
+        DiagnosticModule.publicData,
+        DiagnosticStage.request,
+        error: error,
+      );
       if (cached == null) rethrow;
     }
   }
@@ -53,6 +89,7 @@ class CampusMapRepository {
   Future<CampusMap?> readCached() async {
     try {
       final file = File.fromUri((await _directory()).uri.resolve(_fileName));
+      if (!await file.exists()) return null;
       if (await file.length() > _maxBytes + _maxHeaderBytes) return null;
       final entry = await file.readAsBytes();
       final separator = entry.indexOf(0x0a);
@@ -71,16 +108,25 @@ class CampusMapRepository {
         etag: sameResource ? header['etag'] as String? : null,
         lastModified: sameResource ? header['lastModified'] as String? : null,
       );
-    } catch (_) {
-      // An unreadable cache falls back to an unconditional download.
+    } catch (error) {
+      diagnostics.record(
+        DiagnosticModule.cache,
+        DiagnosticStage.read,
+        error: error,
+      );
       return null;
     }
   }
 
-  Future<CampusMap> refresh(CampusMap? cached) =>
-      _inFlight ??= _refresh(cached).whenComplete(() => _inFlight = null);
+  Future<CampusMap> refresh(CampusMap? cached) {
+    final version = _writes.version;
+    return _inFlight ??= _refresh(cached, version).whenComplete(() {
+      if (_writes.current(version)) _inFlight = null;
+    });
+  }
 
-  Future<CampusMap> _refresh(CampusMap? cached) async {
+  Future<CampusMap> _refresh(CampusMap? cached, int? version) async {
+    if (version == null) throw const FormatException('正在清理校园地图缓存');
     final response = await _client.getBytes(
       _path,
       source: PublicDataSource.assets,
@@ -105,9 +151,13 @@ class CampusMapRepository {
       lastModified: response.headers['last-modified'],
     );
     try {
-      await _write(map);
-    } catch (_) {
-      // A disk failure still allows the validated image to be displayed.
+      await _writes.write(version, () => _write(map));
+    } catch (error) {
+      diagnostics.record(
+        DiagnosticModule.cache,
+        DiagnosticStage.write,
+        error: error,
+      );
     }
     return map;
   }

@@ -10,6 +10,23 @@ import 'package:http/http.dart' as http;
 import 'package:pointycastle/export.dart';
 
 import '../auth/neuq_login_protocol.dart';
+import '../diagnostics/diagnostics.dart';
+
+enum SchoolSessionHealth { unknown, restoring, connected, expired, offline }
+
+typedef SchoolSessionStatus = ({String? subject, SchoolSessionHealth health});
+
+DiagnosticCode schoolFailureCode(Object error) => switch (error) {
+  SchoolRequestFailure.expired => DiagnosticCode.sessionExpired,
+  SchoolRequestFailure.unavailable => DiagnosticCode.unavailable,
+  SchoolRequestFailure.denied ||
+  SchoolRequestFailure.differentAccount ||
+  SchoolRequestFailure.invalidCredentials ||
+  SchoolRequestFailure.verificationRequired => DiagnosticCode.rejected,
+  SchoolRequestFailure.unsupportedLogin => DiagnosticCode.invalidData,
+  FormatException() => DiagnosticCode.invalidData,
+  _ => DiagnosticCode.unexpected,
+};
 
 enum SchoolRequestFailure implements Exception {
   expired('教务登录已过期，请重新连接。'),
@@ -55,11 +72,13 @@ class NeuqClient {
   NeuqClient({
     required this.readRemembered,
     required this.forgetRemembered,
+    this.onSessionStatus,
     http.Client Function()? createClient,
   }) : _createClient = createClient ?? http.Client.new;
 
   final Future<NeuqCredentials?> Function(String subject) readRemembered;
   final Future<void> Function(String subject) forgetRemembered;
+  final void Function(SchoolSessionStatus)? onSessionStatus;
   final http.Client Function() _createClient;
   Future<void> _tail = Future.value();
   NeuqSession? _session;
@@ -74,21 +93,52 @@ class NeuqClient {
     String? expectedSubject,
     required Future<void> Function(String) onVerified,
   }) => _queue((generation) async {
-    final subject = await _signIn(
-      credentials,
-      expectedSubject,
-      generation,
-      onVerified,
-    );
-    _retryAfter = null;
-    _renewalFailure = null;
-    return subject;
+    try {
+      if (expectedSubject != null) {
+        _publish(expectedSubject, SchoolSessionHealth.restoring, generation);
+      }
+      final subject = await _signIn(
+        credentials,
+        expectedSubject,
+        generation,
+        onVerified,
+      );
+      _retryAfter = null;
+      _renewalFailure = null;
+      _publish(subject, SchoolSessionHealth.connected, generation);
+      return subject;
+    } catch (error) {
+      _recordFailure(DiagnosticStage.signIn, error);
+      if (expectedSubject != null) {
+        _publishFailure(expectedSubject, error, generation);
+      }
+      rethrow;
+    }
   });
 
   Future<T> read<T>(
     String subject,
     Future<T> Function(NeuqSession) operation,
   ) => _queue((generation) async {
+    if (_subject != null && _subject != subject) {
+      throw SchoolRequestFailure.differentAccount;
+    }
+    try {
+      final result = await _readAcademic(subject, operation, generation);
+      _publish(subject, SchoolSessionHealth.connected, generation);
+      return result;
+    } catch (error) {
+      _recordFailure(DiagnosticStage.request, error);
+      _publishFailure(subject, error, generation);
+      rethrow;
+    }
+  });
+
+  Future<T> _readAcademic<T>(
+    String subject,
+    Future<T> Function(NeuqSession) operation,
+    int generation,
+  ) async {
     final current = _subject == subject ? _session : null;
     if (current == null) {
       return operation(await _renew(subject, generation));
@@ -98,23 +148,30 @@ class NeuqClient {
     } on SchoolRequestFailure catch (error) {
       if (error != SchoolRequestFailure.expired) rethrow;
       _checkGeneration(generation);
+      _publish(subject, SchoolSessionHealth.restoring, generation);
       try {
-        if (await current.verify() != subject) {
+        final verified = await current.verify();
+        _checkGeneration(generation);
+        if (verified != subject) {
           _clearSession();
           throw SchoolRequestFailure.differentAccount;
         }
       } on SchoolRequestFailure catch (failure) {
         if (failure != SchoolRequestFailure.expired) rethrow;
+        _checkGeneration(generation);
         _clearSession();
         return operation(await _renew(subject, generation));
       }
       _checkGeneration(generation);
       return operation(current);
     }
-  });
+  }
 
   Future<Uri> campusCardSignIn(String subject, Uri login) =>
       _queue((generation) async {
+        if (_subject != null && _subject != subject) {
+          throw SchoolRequestFailure.differentAccount;
+        }
         final service = campusCardCasService(login);
         if (service == null) throw SchoolRequestFailure.unsupportedLogin;
         final current = _subject == subject ? _session : null;
@@ -126,11 +183,15 @@ class NeuqClient {
             _checkGeneration(generation);
           }
         }
-        final renewed = await _renew(subject, generation);
+        final renewed = await _renew(subject, generation, publish: true);
         return renewed._campusCardReturn(login, service);
       });
 
-  Future<NeuqSession> _renew(String subject, int generation) async {
+  Future<NeuqSession> _renew(
+    String subject,
+    int generation, {
+    bool publish = false,
+  }) async {
     final retryAfter = _retryAfter;
     if (retryAfter != null && DateTime.now().isBefore(retryAfter)) {
       throw _renewalFailure ?? SchoolRequestFailure.expired;
@@ -139,11 +200,14 @@ class NeuqClient {
     _checkGeneration(generation);
     if (credentials == null) throw SchoolRequestFailure.expired;
     try {
+      _publish(subject, SchoolSessionHealth.restoring, generation);
       await _signIn(credentials, subject, generation, (_) async {});
       _retryAfter = null;
       _renewalFailure = null;
+      if (publish) _publish(subject, SchoolSessionHealth.connected, generation);
       return _session!;
     } on SchoolRequestFailure catch (error) {
+      _recordFailure(DiagnosticStage.renew, error);
       _checkGeneration(generation);
       if (error == SchoolRequestFailure.invalidCredentials ||
           error == SchoolRequestFailure.differentAccount) {
@@ -151,9 +215,37 @@ class NeuqClient {
       }
       _retryAfter = DateTime.now().add(const Duration(minutes: 5));
       _renewalFailure = error;
+      if (publish) _publishFailure(subject, error, generation);
+      rethrow;
+    } catch (error) {
+      _recordFailure(DiagnosticStage.renew, error);
+      if (publish) _publishFailure(subject, error, generation);
       rethrow;
     }
   }
+
+  void _publish(String? subject, SchoolSessionHealth health, int generation) {
+    if (!_disposed && generation == _generation) {
+      onSessionStatus?.call((subject: subject, health: health));
+    }
+  }
+
+  void _publishFailure(String subject, Object error, int generation) =>
+      _publish(subject, switch (error) {
+        SchoolRequestFailure.expired ||
+        SchoolRequestFailure.invalidCredentials ||
+        SchoolRequestFailure.verificationRequired ||
+        SchoolRequestFailure.differentAccount => SchoolSessionHealth.expired,
+        _ => SchoolSessionHealth.offline,
+      }, generation);
+
+  void _recordFailure(DiagnosticStage stage, Object error) =>
+      diagnostics.record(
+        DiagnosticModule.schoolAuth,
+        stage,
+        code: schoolFailureCode(error),
+        error: error,
+      );
 
   Future<String> _signIn(
     NeuqCredentials credentials,
@@ -215,6 +307,7 @@ class NeuqClient {
     _retryAfter = null;
     _renewalFailure = null;
     _clearSession();
+    _publish(null, SchoolSessionHealth.unknown, _generation);
     return _queue((_) => erase());
   }
 
@@ -465,7 +558,12 @@ class NeuqSession {
         _rememberCookie(uri, header, now);
       }
       return response;
-    } catch (_) {
+    } catch (error) {
+      diagnostics.record(
+        DiagnosticModule.schoolAuth,
+        DiagnosticStage.request,
+        error: error,
+      );
       throw SchoolRequestFailure.unavailable;
     }
   }
@@ -517,7 +615,14 @@ class NeuqSession {
         bytes.add(chunk);
       }
       return utf8.decode(bytes.takeBytes());
-    } catch (_) {
+    } catch (error) {
+      diagnostics.record(
+        DiagnosticModule.schoolAuth,
+        error is FormatException
+            ? DiagnosticStage.decode
+            : DiagnosticStage.request,
+        error: error,
+      );
       throw SchoolRequestFailure.unavailable;
     }
   }

@@ -17,11 +17,14 @@ jobs:
     timeout-minutes: 45
     permissions:
       contents: read
+    outputs:
+      channel: ${{ steps.release-config.outputs.channel }}
     steps:
       - uses: actions/checkout@v6
         with:
           persist-credentials: false
-      - name: Validate the Git tag against pubspec.yaml
+      - name: Validate the Git tag and release channel
+        id: release-config
         shell: bash
         run: |
           version=$(ruby -ryaml -e 'print YAML.safe_load_file("pubspec.yaml").fetch("version")')
@@ -30,12 +33,19 @@ jobs:
             echo 'Git 标签必须为 vMAJOR.MINOR.PATCH，并与 pubspec.yaml 的版本号一致。'
             exit 1
           fi
+          channel=$(<.github/release-channel)
+          case "$channel" in
+            beta|stable) echo "channel=$channel" >> "$GITHUB_OUTPUT" ;;
+            *) echo '发布渠道必须为 beta 或 stable。'; exit 1 ;;
+          esac
       - uses: ./.github/actions/verify-android
         id: verify-android
       - name: Build and verify signed APKs by ABI
         shell: bash
         env:
           APKSIGNER: ${{ steps.verify-android.outputs.apksigner }}
+          AAPT2: ${{ steps.verify-android.outputs.aapt2 }}
+          UPDATE_CHANNEL: ${{ steps.release-config.outputs.channel }}
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
@@ -77,6 +87,7 @@ jobs:
           unset ANDROID_KEYSTORE_BASE64 ANDROID_KEYSTORE_PASSWORD ANDROID_KEY_ALIAS ANDROID_KEY_PASSWORD
 
           flutter build apk --release --split-per-abi --no-pub \
+            --dart-define="NEUQ_ONE_UPDATE_CHANNEL=$UPDATE_CHANNEL" \
             --dart-define="NEUQ_ONE_REPOSITORY_URL=https://github.com/$GITHUB_REPOSITORY"
 
           mkdir -p release-apks
@@ -88,6 +99,7 @@ jobs:
               echo "$abi APK 的签名与正式发布证书不符。"
               exit 1
             fi
+            python3 .github/actions/verify-android/verify_notifications.py "$AAPT2" "$apk"
             cp "$apk" "release-apks/neuq-one-$GITHUB_REF_NAME-$abi.apk"
           done
       - uses: actions/upload-artifact@v6
@@ -104,6 +116,9 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
       - uses: actions/download-artifact@v7
         with:
           name: release-apks
@@ -112,18 +127,21 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
+          UPDATE_CHANNEL: ${{ needs.build.outputs.channel }}
         run: |
           release_flags=(--latest)
-          if [[ "$GITHUB_REF_NAME" == 'v0.1.0' ]]; then
-            release_flags=(--prerelease --latest=false --title "$GITHUB_REF_NAME 公测版"
-              --notes 'NEUQ One 首个 Android 公测版，提供课表、成绩、空教室、校园地图、学校政策和校园邮箱等功能。常见 Android 手机请选择 arm64-v8a 安装包。')
+          if [[ "$UPDATE_CHANNEL" == 'beta' ]]; then
+            release_flags=(--prerelease --latest=false --title "$GITHUB_REF_NAME 公测版")
+          fi
+          notes=".github/release-notes/$GITHUB_REF_NAME.md"
+          if [[ -f "$notes" ]]; then
+            release_flags+=(--notes-file "$notes")
           fi
           gh release create "$GITHUB_REF_NAME" release-apks/*.apk \
             --repo "$GITHUB_REPOSITORY" --verify-tag --generate-notes "${release_flags[@]}"
 
   update-version-manifest:
     needs: publish
-    if: github.ref_name != 'v0.1.0'
     uses: ./.github/workflows/app-version.yml
     secrets:
       NEUQ_ASSETS_DISPATCH_TOKEN: ${{ secrets.NEUQ_ASSETS_DISPATCH_TOKEN }}

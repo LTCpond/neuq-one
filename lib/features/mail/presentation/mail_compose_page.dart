@@ -1,6 +1,7 @@
 import 'package:file_picker/file_picker.dart';
 import 'package:material_ui/material_ui.dart';
 
+import '../../../core/storage/picker_cache.dart';
 import '../../../core/widgets/screen.dart';
 import '../data/campus_mail.dart';
 
@@ -50,6 +51,7 @@ class _MailComposePageState extends State<_MailComposePage> {
   late final _subject = TextEditingController(text: widget.subject);
   late final _body = TextEditingController(text: widget.body);
   final _attachments = <PlatformFile>[];
+  VoidCallback? _releasePickedFiles;
   bool _more = false;
   bool _sending = false;
   bool _picking = false;
@@ -57,6 +59,7 @@ class _MailComposePageState extends State<_MailComposePage> {
 
   @override
   void dispose() {
+    _releasePickedFiles?.call();
     for (final controller in [_to, _cc, _bcc, _subject, _body]) {
       controller.dispose();
     }
@@ -67,11 +70,22 @@ class _MailComposePageState extends State<_MailComposePage> {
     setState(() => _picking = true);
     try {
       final files = await pickMailAttachments();
-      if (mounted) setState(() => _attachments.addAll(files));
+      if (mounted && files.isNotEmpty) {
+        _releasePickedFiles ??= pickerCache.retain();
+        setState(() => _attachments.addAll(files));
+      }
     } catch (_) {
       if (mounted) showMessage(context, '无法读取所选附件。');
     } finally {
       if (mounted) setState(() => _picking = false);
+    }
+  }
+
+  void _removeAttachment(PlatformFile file) {
+    setState(() => _attachments.remove(file));
+    if (_attachments.isEmpty) {
+      _releasePickedFiles?.call();
+      _releasePickedFiles = null;
     }
   }
 
@@ -199,7 +213,7 @@ class _MailComposePageState extends State<_MailComposePage> {
                       icon: const Icon(Icons.close),
                       onPressed: _sending
                           ? null
-                          : () => setState(() => _attachments.remove(file)),
+                          : () => _removeAttachment(file),
                     ),
                   ),
                 ),

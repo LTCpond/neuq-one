@@ -20,8 +20,13 @@ class _EmploymentPageState extends ConsumerState<EmploymentPage> {
 
   @override
   Widget build(BuildContext context) {
-    final current = ref.watch(employmentRefreshProvider(_force));
-    final cache = ref.watch(employmentCacheProvider);
+    final visible = TickerMode.valuesOf(context).enabled;
+    final AsyncValue<EmploymentSnapshot?> current = visible
+        ? ref.watch(employmentRefreshProvider(_force))
+        : const AsyncData<EmploymentSnapshot?>(null);
+    final cache = visible
+        ? ref.watch(employmentCacheProvider)
+        : const AsyncData<EmploymentSnapshot?>(null);
     final snapshot = current.value ?? cache.value;
     final updated = snapshot?.syncedAt.toUtc().add(campusOffset);
     void refresh() {
@@ -69,13 +74,12 @@ class _EmploymentPageState extends ConsumerState<EmploymentPage> {
           if (current.isLoading && snapshot != null)
             const LinearProgressIndicator(),
           const SizedBox(height: 8),
-          DataPanel(
+          DataPanel<EmploymentSnapshot?>(
             value: snapshot == null ? current : AsyncData(snapshot),
             retry: refresh,
             builder: (snapshot) {
-              final events = snapshot.events.where(
-                (event) => event.kind == _kind,
-              );
+              final events = (snapshot?.events ?? const <EmploymentEvent>[])
+                  .where((event) => event.kind == _kind);
               if (events.isEmpty) {
                 return StatePanel(
                   '暂无${_kind.label}',

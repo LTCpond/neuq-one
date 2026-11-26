@@ -68,6 +68,9 @@ class _ExistingPreferences implements SharedPreferencesAsync {
   };
 
   @override
+  Future<bool?> getBool(String key) async => values[key] as bool?;
+
+  @override
   Future<int?> getInt(String key) async => values[key] as int?;
 
   @override

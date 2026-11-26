@@ -3,7 +3,10 @@ import 'dart:io';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:html/parser.dart' as html;
+import 'package:shared_preferences/shared_preferences.dart';
 
+import '../../../core/diagnostics/diagnostics.dart';
+import '../../../core/storage/cache_files.dart';
 import '../../../core/storage/settings.dart';
 
 enum EmploymentKind {
@@ -69,45 +72,115 @@ typedef EmploymentSnapshot = ({
   DateTime syncedAt,
 });
 
-final employmentCacheProvider = FutureProvider<EmploymentSnapshot?>((
-  ref,
-) async {
-  final stored = await ref.watch(preferencesProvider).getString(_cacheKey);
-  if (stored == null) return null;
-  try {
-    final json = jsonDecode(stored) as Map<String, dynamic>;
-    return (
-      events: (json['events'] as List)
-          .map((item) => EmploymentEvent.fromJson(item as Map<String, dynamic>))
-          .toList(),
-      syncedAt: DateTime.parse(json['syncedAt'] as String),
-    );
-  } catch (_) {
-    return null;
-  }
-});
+final employmentRepositoryProvider = Provider(
+  (ref) => EmploymentRepository(ref.watch(preferencesProvider)),
+);
+
+final employmentCacheProvider = FutureProvider<EmploymentSnapshot?>(
+  (ref) => ref.watch(employmentRepositoryProvider).read(),
+);
 
 final employmentRefreshProvider = FutureProvider.autoDispose
     .family<EmploymentSnapshot, bool>((ref, force) async {
-      final prefs = ref.watch(preferencesProvider);
-      final previous = await ref.read(employmentCacheProvider.future);
-      if (!force &&
-          previous != null &&
-          DateTime.now().difference(previous.syncedAt) < _ttl) {
-        return previous;
-      }
-      final events = readEmploymentFeed(await _readHome());
-      final now = DateTime.now().toUtc();
-      await prefs.setString(
-        _cacheKey,
-        jsonEncode({
-          'events': events.map((event) => event.toJson()).toList(),
-          'syncedAt': now.toIso8601String(),
-        }),
-      );
+      final repository = ref.watch(employmentRepositoryProvider);
+      final result = await repository.refresh(force: force);
       if (ref.mounted) ref.invalidate(employmentCacheProvider);
-      return (events: events, syncedAt: now);
+      return result;
     }, retry: (_, _) => null);
+
+class EmploymentRepository {
+  EmploymentRepository(this._prefs);
+
+  final SharedPreferencesAsync _prefs;
+  final _writes = CacheWrites();
+  Future<EmploymentSnapshot>? _inFlight;
+
+  Future<int> cacheBytes() async {
+    final value = await _prefs.getString(_cacheKey);
+    return value == null ? 0 : utf8.encode(value).length;
+  }
+
+  Future<void> clearCache() {
+    final clearing = _writes.clear(() => _prefs.remove(_cacheKey));
+    _inFlight = null;
+    return clearing;
+  }
+
+  Future<EmploymentSnapshot?> read() async {
+    try {
+      final stored = await _prefs.getString(_cacheKey);
+      if (stored == null) return null;
+      final json = jsonDecode(stored) as Map<String, dynamic>;
+      return (
+        events: (json['events'] as List)
+            .map(
+              (item) => EmploymentEvent.fromJson(item as Map<String, dynamic>),
+            )
+            .toList(),
+        syncedAt: DateTime.parse(json['syncedAt'] as String),
+      );
+    } catch (error) {
+      diagnostics.record(
+        DiagnosticModule.cache,
+        DiagnosticStage.read,
+        error: error,
+      );
+      return null;
+    }
+  }
+
+  Future<EmploymentSnapshot> refresh({required bool force}) {
+    final version = _writes.version;
+    if (version == null) {
+      return Future.error(const FormatException('正在清理就业信息缓存'));
+    }
+    return _inFlight ??= _refresh(force, version).whenComplete(() {
+      if (_writes.current(version)) _inFlight = null;
+    });
+  }
+
+  Future<EmploymentSnapshot> _refresh(bool force, int version) async {
+    final previous = await read();
+    if (!force &&
+        previous != null &&
+        DateTime.now().difference(previous.syncedAt) < _ttl) {
+      return previous;
+    }
+    final List<EmploymentEvent> events;
+    try {
+      events = readEmploymentFeed(await _readHome());
+    } catch (error) {
+      diagnostics.record(
+        DiagnosticModule.publicData,
+        error is FormatException
+            ? DiagnosticStage.decode
+            : DiagnosticStage.request,
+        error: error,
+      );
+      rethrow;
+    }
+    final now = DateTime.now().toUtc();
+    try {
+      await _writes.write(
+        version,
+        () => _prefs.setString(
+          _cacheKey,
+          jsonEncode({
+            'events': events.map((event) => event.toJson()).toList(),
+            'syncedAt': now.toIso8601String(),
+          }),
+        ),
+      );
+    } catch (error) {
+      diagnostics.record(
+        DiagnosticModule.cache,
+        DiagnosticStage.write,
+        error: error,
+      );
+    }
+    return (events: events, syncedAt: now);
+  }
+}
 
 Future<String> _readHome() async {
   final timeout = const Duration(seconds: 12);

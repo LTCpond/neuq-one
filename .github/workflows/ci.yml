@@ -17,9 +17,14 @@ jobs:
         with:
           persist-credentials: false
       - uses: ./.github/actions/verify-android
+        id: verify-android
 
       - name: Build debug APK
         run: flutter build apk --debug --no-pub --dart-define=NEUQ_ONE_REPOSITORY_URL=https://github.com/${{ github.repository }}
+      - name: Verify notification resources and manifest
+        env:
+          AAPT2: ${{ steps.verify-android.outputs.aapt2 }}
+        run: python3 .github/actions/verify-android/verify_notifications.py "$AAPT2" build/app/outputs/flutter-apk/app-debug.apk
       - uses: actions/upload-artifact@v6
         with:
           name: neuq-one-debug

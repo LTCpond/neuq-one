@@ -154,7 +154,16 @@ class _MapViewportState extends State<_MapViewport> {
   }
 
   @override
+  void didUpdateWidget(covariant _MapViewport oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!identical(oldWidget.map.bytes, widget.map.bytes)) {
+      unawaited(MemoryImage(oldWidget.map.bytes).evict());
+    }
+  }
+
+  @override
   void dispose() {
+    unawaited(MemoryImage(widget.map.bytes).evict());
     _transform.dispose();
     super.dispose();
   }

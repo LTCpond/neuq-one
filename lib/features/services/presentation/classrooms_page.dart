@@ -23,24 +23,59 @@ class _ClassroomsPageState extends ConsumerState<ClassroomsPage> {
   late DateTime _today;
   late final AppLifecycleListener _lifecycle;
   Timer? _clockTimer;
+  Timer? _refreshTimer;
+  bool _foreground = true;
+  bool _visible = false;
 
   @override
   void initState() {
     super.initState();
     _today = campusDateAt(ref.read(classroomsClockProvider)());
+    final lifecycle = WidgetsBinding.instance.lifecycleState;
+    _foreground = lifecycle == null || lifecycle == AppLifecycleState.resumed;
     _lifecycle = AppLifecycleListener(
-      onResume: () => _updateClock(resumed: true),
+      onStateChange: (state) {
+        _foreground = state == AppLifecycleState.resumed;
+        _coordinateTimers();
+      },
+    );
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final visible = ModalRoute.isCurrentOf(context) ?? true;
+    if (_visible == visible) return;
+    _visible = visible;
+    _coordinateTimers();
+  }
+
+  bool get _running => _foreground && _visible;
+
+  void _coordinateTimers() {
+    if (!_running) {
+      _refreshTimer?.cancel();
+      _refreshTimer = null;
+      _clockTimer?.cancel();
+      return;
+    }
+    if (_refreshTimer != null) return;
+    _refreshTimer = Timer.periodic(
+      Classrooms.refreshInterval,
+      (_) => _updateClock(),
     );
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) _refresh();
+      if (mounted && _running) _updateClock();
     });
+    WidgetsBinding.instance.ensureVisualUpdate();
   }
 
   void _refresh({bool force = false}) {
     unawaited(ref.read(classroomsProvider.notifier).refresh(force: force));
   }
 
-  void _updateClock({bool resumed = false}) {
+  void _updateClock() {
+    if (!_running) return;
     final today = campusDateAt(ref.read(classroomsClockProvider)());
     final dayChanged = today != _today;
     setState(() => _today = today);
@@ -48,10 +83,11 @@ class _ClassroomsPageState extends ConsumerState<ClassroomsPage> {
         (ref.read(classroomViewProvider).date?.isBefore(today) ?? false)) {
       ref.read(classroomViewProvider.notifier).selectDate(null);
     }
-    if (dayChanged || resumed) _refresh();
+    _refresh();
   }
 
   void _watchClock(DateTime now, Map<int, ClassroomSlot>? slots) {
+    if (!_running) return;
     var next = _today.add(const Duration(days: 1)).subtract(campusOffset);
     if (slots != null) {
       for (final slot in slots.values) {
@@ -67,6 +103,7 @@ class _ClassroomsPageState extends ConsumerState<ClassroomsPage> {
   @override
   void dispose() {
     _clockTimer?.cancel();
+    _refreshTimer?.cancel();
     _lifecycle.dispose();
     super.dispose();
   }
@@ -84,7 +121,8 @@ class _ClassroomsPageState extends ConsumerState<ClassroomsPage> {
     final selected = dates.contains(view.date) ? view.date! : _today;
     final day = state.snapshot?.days[selected];
     final slots = day?.buildings[view.building];
-    final updated = day?.updatedAt;
+    final building = classroomBuildingAt(slots, now);
+    final updated = building.updatedAt;
     _watchClock(now, slots);
 
     final colors = Theme.of(context).colorScheme;
@@ -166,12 +204,23 @@ class _ClassroomsPageState extends ConsumerState<ClassroomsPage> {
             const SizedBox(height: 8),
             if (updated != null)
               Text('数据更新于 ${_collectionTime(updated)}', style: caption),
+            if (building.status == ClassroomBuildingStatus.partial)
+              Text('部分时段数据未更新', style: caption),
+            if (slots != null &&
+                building.status == ClassroomBuildingStatus.unavailable)
+              Text('此楼栋所选日期的时段数据均不可用', style: caption),
             if (state.isLoading) Text('正在更新空教室数据', style: caption),
             if (state.refreshFailed && slots != null)
               Text('更新失败，正在显示上次数据', style: caption),
             const SizedBox(height: 10),
             if (slots != null)
-              ..._schedule(slots, now, view, selection.selectTable)
+              ..._schedule(
+                slots,
+                now,
+                view,
+                building.status,
+                selection.selectTable,
+              )
             else if (state.isLoading)
               DataPanel<void>(
                 value: const AsyncLoading(),
@@ -203,6 +252,7 @@ class _ClassroomsPageState extends ConsumerState<ClassroomsPage> {
     Map<int, ClassroomSlot> slots,
     DateTime now,
     ClassroomView view,
+    ClassroomBuildingStatus status,
     ValueChanged<bool> selectTable,
   ) {
     final schedule = classroomScheduleAt(slots, now);
@@ -215,10 +265,7 @@ class _ClassroomsPageState extends ConsumerState<ClassroomsPage> {
         ],
       ),
       const SizedBox(height: 11),
-      if (schedule.freeByPeriod.isEmpty &&
-          slots.values.any(
-            (slot) => slot.statusAt(now) == ClassroomSlotStatus.stale,
-          ))
+      if (status == ClassroomBuildingStatus.historical)
         const Padding(
           padding: EdgeInsets.only(bottom: 10),
           child: Text('此楼栋所选日期的已有记录均已过期，暂无法确认空闲时段。'),

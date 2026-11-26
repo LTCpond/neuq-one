@@ -60,7 +60,9 @@ void main() {
             const UnavailableSchoolAuthRepository(),
           ),
           settingsProvider.overrideWith(_TestSettings.new),
-          reminderSyncProvider.overrideWith((ref) async {}),
+          reminderSyncProvider.overrideWith(
+            (ref) async => const ReminderStatus(ReminderCondition.off),
+          ),
         ],
         child: const NeuqOneApp(),
       ),
@@ -156,7 +158,7 @@ void main() {
       expect(
         find.text(
           'NEUQ One 尊重并保护用户隐私。用户相关信息均在本地设备处理和存储，仅在使用相关功能时与学校系统或对应服务提供方进行必要的数据交互。\n\n'
-          '本应用不会向项目维护者的服务器上传用户个人数据，不包含广告、行为追踪或用户数据统计功能，源代码公开可查。',
+          '本应用不会向项目维护者的服务器上传用户个人数据，不包含广告、行为追踪或用户数据统计功能，源代码公开可查。诊断信息只保存在本次运行的内存中，由用户手动复制。',
         ),
         findsOneWidget,
       );
@@ -914,7 +916,7 @@ void main() {
   var expiryTime = DateTime.utc(2026, 11, 25, 9, 18, 59);
   var expiryReads = 0;
   _appTest(
-    'an open classroom page marks slots stale at expiry without another request',
+    'an open classroom page revalidates at expiry and preserves historical data',
     (tester) async {
       await _tab(tester, '服务');
       await tester.tap(find.text('空教室'));
@@ -937,7 +939,7 @@ void main() {
         ),
       );
       expect(historicalEmpty, findsWidgets);
-      expect(expiryReads, 1);
+      expect(expiryReads, 2);
     },
     classroomResponse: () {
       expiryReads++;
@@ -947,6 +949,46 @@ void main() {
   );
 
   final cardRepository = _TestCampusCardRepository();
+
+  var periodicTime = classroomNow;
+  var periodicReads = 0;
+  _appTest(
+    'classroom timer refreshes only while foreground and stops when leaving',
+    (tester) async {
+      await _tab(tester, '服务');
+      await tester.tap(find.text('空教室'));
+      await tester.pumpAndSettle();
+      expect(periodicReads, 1);
+      periodicTime = periodicTime.add(const Duration(minutes: 5));
+      await tester.pump(const Duration(minutes: 5));
+      await tester.pumpAndSettle();
+      expect(periodicReads, 2);
+      final lifecycle = tester.binding;
+      lifecycle.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+      lifecycle.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
+      lifecycle.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+      periodicTime = periodicTime.add(const Duration(minutes: 10));
+      await tester.pump(const Duration(minutes: 10));
+      expect(periodicReads, 2);
+      lifecycle.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
+      lifecycle.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+      lifecycle.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      await tester.pumpAndSettle();
+      expect(periodicReads, 3);
+      await tester.tap(find.byType(BackButton));
+      await tester.pumpAndSettle();
+      expect(find.byType(ClassroomsPage), findsNothing);
+      periodicTime = periodicTime.add(const Duration(minutes: 10));
+      await tester.pump(const Duration(minutes: 10));
+      expect(periodicReads, 3);
+    },
+    classroomResponse: () {
+      periodicReads++;
+      return http.Response.bytes(utf8.encode(classroomWeekBody()), 200);
+    },
+    classroomClock: () => periodicTime,
+  );
+
   _appTest(
     'campus card refresh runs only when the services menu becomes visible',
     (tester) async {
@@ -1118,9 +1160,10 @@ void _appTest(
             timetableRepositoryProvider.overrideWithValue(timetable),
             gradesRepositoryProvider.overrideWithValue(grades),
             settingsProvider.overrideWith(_TestSettings.new),
-            reminderSyncProvider.overrideWith(
-              (ref) async => onReminderSync?.call(),
-            ),
+            reminderSyncProvider.overrideWith((ref) async {
+              onReminderSync?.call();
+              return const ReminderStatus(ReminderCondition.off);
+            }),
           ],
           child: const NeuqOneApp(),
         ),

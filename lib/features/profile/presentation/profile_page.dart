@@ -1,9 +1,11 @@
-import 'package:file_picker/file_picker.dart';
 import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../app/school_reconnect_button.dart';
 import '../../../core/auth/school_auth.dart';
+import '../../../core/database/school_data.dart';
+import '../../../core/diagnostics/diagnostics.dart';
 import '../../../core/network/official_browser.dart';
 import '../../../core/storage/settings.dart';
 import '../../../core/theme/app_theme.dart';
@@ -11,6 +13,10 @@ import '../../../core/widgets/campus_components.dart';
 import '../../../core/widgets/screen.dart';
 import '../data/app_updates.dart';
 import '../data/course_reminders.dart';
+import 'cache_management_page.dart';
+import 'diagnostics_page.dart';
+import 'reminder_settings_page.dart';
+import 'update_prompt.dart';
 
 const _repositoryUrl = String.fromEnvironment(
   'NEUQ_ONE_REPOSITORY_URL',
@@ -38,7 +44,12 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
       if (message != null && mounted) showMessage(context, message);
     } on FormatException catch (error) {
       if (mounted) showMessage(context, error.message);
-    } catch (_) {
+    } catch (error) {
+      diagnostics.record(
+        DiagnosticModule.schoolAuth,
+        DiagnosticStage.clear,
+        error: error,
+      );
       if (mounted) showMessage(context, '操作失败，请检查设备设置后重试');
     } finally {
       if (mounted) setState(() => _busy = false);
@@ -56,47 +67,32 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
   Future<void> _checkForUpdate() async {
     if (_checkingForUpdate) return;
     setState(() => _checkingForUpdate = true);
-    final AppUpdateResult result;
     try {
-      result = await ref.read(appUpdatesProvider).checkForUpdate();
-    } catch (_) {
+      await checkAndPresentAppUpdate(
+        context,
+        ref.read(appUpdateCoordinatorProvider),
+        onChecked: () {
+          if (mounted) setState(() => _checkingForUpdate = false);
+        },
+      );
+    } catch (error) {
+      diagnostics.record(
+        DiagnosticModule.updates,
+        DiagnosticStage.initialize,
+        error: error,
+      );
       if (mounted) showMessage(context, '检查更新失败，请稍后重试');
-      return;
     } finally {
-      if (mounted) setState(() => _checkingForUpdate = false);
-    }
-    if (!mounted) return;
-    switch (result) {
-      case NoPublishedAppRelease():
-        showMessage(context, '暂无可用更新');
-      case AppUpToDate():
-        showMessage(context, '当前已是最新版本');
-      case AppUpdateAvailable(
-        :final currentVersion,
-        :final latestVersion,
-        :final url,
-      ):
-        final open = await showDialog<bool>(
-          context: context,
-          builder: (context) => AlertDialog(
-            scrollable: true,
-            title: const Text('发现新版本'),
-            content: Text('当前版本 v$currentVersion\n最新版本 v$latestVersion'),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context, false),
-                child: const Text('关闭'),
-              ),
-              TextButton(
-                onPressed: () => Navigator.pop(context, true),
-                child: const Text('前往 GitHub 下载'),
-              ),
-            ],
-          ),
-        );
-        if (open == true && mounted) await openOfficialPage(context, url);
+      if (mounted && _checkingForUpdate) {
+        setState(() => _checkingForUpdate = false);
+      }
     }
   }
+
+  void _openSettings(Widget page) => Navigator.of(
+    context,
+    rootNavigator: true,
+  ).push<void>(MaterialPageRoute(builder: (_) => page));
 
   @override
   Widget build(BuildContext context) {
@@ -106,6 +102,7 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
     final remembered = ref.watch(rememberedSchoolPasswordProvider);
     final reminders = ref.watch(reminderSyncProvider);
     final installedVersion = ref.watch(installedAppVersionProvider);
+    final availableUpdate = ref.watch(availableAppUpdateProvider).value;
     final colors = Theme.of(context).colorScheme;
     final dark = colors.brightness == Brightness.dark;
     return Scaffold(
@@ -118,7 +115,23 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
               retry: () => ref.invalidate(schoolConnectionProvider),
               builder: (status) => _AccountCard(
                 status: status,
-                onLogout: status == SchoolConnection.connected && !_busy
+                onReconnect:
+                    !_busy &&
+                        (status == SchoolConnection.expired ||
+                            status == SchoolConnection.offline ||
+                            status == SchoolConnection.unknown)
+                    ? SchoolReconnectButton(
+                        onConnected: () {
+                          for (final section in SchoolDataSet.values) {
+                            ref.invalidate(schoolRefreshProvider(section));
+                          }
+                        },
+                      )
+                    : null,
+                onLogout:
+                    status != SchoolConnection.unavailable &&
+                        status != SchoolConnection.disconnected &&
+                        !_busy
                     ? () => _run(() async {
                         await ref
                             .read(schoolSessionProvider.notifier)
@@ -171,49 +184,18 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
                         ),
                       ),
                       const SizedBox(height: 6),
-                      PopupMenuButton<int>(
-                        enabled: !_busy,
-                        tooltip: '设置课程提醒',
-                        initialValue: value.reminderMinutes,
-                        onSelected: (minute) => _run(() async {
-                          if (minute != 0 &&
-                              !await ref
-                                  .read(reminderServiceProvider)
-                                  .requestPermission()) {
-                            return '请在设备设置中允许通知后重试';
-                          }
-                          await controller.setReminder(minute);
-                          ref.invalidate(reminderSyncProvider);
-                          await ref.read(reminderSyncProvider.future);
-                          return minute == 0 ? '课程提醒已关闭' : '已保存课程提醒设置';
-                        }),
-                        itemBuilder: (_) => [
-                          const PopupMenuItem(value: 0, child: Text('关闭')),
-                          for (final minute in [5, 10, 15, 30])
-                            PopupMenuItem(
-                              value: minute,
-                              child: Text('提前 $minute 分钟'),
-                            ),
-                        ],
-                        child: _ProfileTile(
-                          icon: const Icon(Icons.notifications_none_outlined),
-                          title: '课程提醒',
-                          subtitle:
-                              reminders.hasError && value.reminderMinutes > 0
-                              ? '排程失败，请重试'
-                              : value.reminderMinutes == 0
-                              ? '关闭'
-                              : '提前 ${value.reminderMinutes} 分钟 · 系统可能延迟',
-                          accent: dark
-                              ? (
-                                  const Color(0xFF563D25),
-                                  const Color(0xFFFFD1A4),
-                                )
-                              : (
-                                  const Color(0xFFFFE8CF),
-                                  const Color(0xFFA45717),
-                                ),
-                        ),
+                      _ProfileTile(
+                        icon: const Icon(Icons.notifications_none_outlined),
+                        title: '课程提醒',
+                        subtitle: reminderStatusLabel(reminders),
+                        accent: dark
+                            ? (const Color(0xFF563D25), const Color(0xFFFFD1A4))
+                            : (
+                                const Color(0xFFFFE8CF),
+                                const Color(0xFFA45717),
+                              ),
+                        onTap: () =>
+                            _openSettings(const ReminderSettingsPage()),
                       ),
                     ],
                   ),
@@ -235,17 +217,12 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
                 ],
                 _ProfileTile(
                   icon: const Icon(Icons.delete_outline),
-                  title: '清除缓存',
-                  subtitle: '移除文件选择产生的临时副本',
+                  title: '缓存管理',
+                  subtitle: '查看占用并清理公共数据或临时文件',
                   accent: dark
                       ? (const Color(0xFF214D3B), const Color(0xFFADE3CA))
                       : (const Color(0xFFDCF2E7), const Color(0xFF288264)),
-                  onTap: _busy
-                      ? null
-                      : () => _run(() async {
-                          await FilePicker.clearTemporaryFiles();
-                          return '临时文件已清除';
-                        }),
+                  onTap: () => _openSettings(const CacheManagementPage()),
                 ),
                 const SizedBox(height: 6),
                 const Text('关于', style: _sectionStyle),
@@ -259,7 +236,7 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
                   onTap: () => _showInfo(
                     '隐私说明',
                     'NEUQ One 尊重并保护用户隐私。用户相关信息均在本地设备处理和存储，仅在使用相关功能时与学校系统或对应服务提供方进行必要的数据交互。\n\n'
-                        '本应用不会向项目维护者的服务器上传用户个人数据，不包含广告、行为追踪或用户数据统计功能，源代码公开可查。',
+                        '本应用不会向项目维护者的服务器上传用户个人数据，不包含广告、行为追踪或用户数据统计功能，源代码公开可查。诊断信息只保存在本次运行的内存中，由用户手动复制。',
                   ),
                 ),
                 const SizedBox(height: 6),
@@ -273,6 +250,9 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
                   ),
                   accent: (colors.primaryContainer, colors.onPrimaryContainer),
                   loadingLabel: _checkingForUpdate ? '正在检查更新' : null,
+                  trailingLabel: availableUpdate == null
+                      ? null
+                      : 'v${availableUpdate.latestVersion} 可用',
                   onTap: _checkForUpdate,
                 ),
                 const SizedBox(height: 6),
@@ -283,10 +263,14 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
                   accent: dark
                       ? (const Color(0xFF25495A), const Color(0xFFAEE5FA))
                       : (const Color(0xFFDDF0F8), const Color(0xFF267795)),
-                  onTap: () => _showInfo(
-                    '关于 NEUQ One',
-                    'NEUQ One 是面向东北大学秦皇岛分校学生的非官方开源校园工作台。学校的正式通知、成绩和业务办理以官方系统为准。',
-                  ),
+                  onTap: _showAbout,
+                ),
+                const SizedBox(height: 6),
+                _ProfileTile(
+                  icon: const Icon(Icons.bug_report_outlined),
+                  title: '诊断信息',
+                  accent: (colors.primaryContainer, colors.onPrimaryContainer),
+                  onTap: () => _openSettings(const DiagnosticsPage()),
                 ),
                 const SizedBox(height: 6),
                 _ProfileTile(
@@ -316,6 +300,36 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
       ),
     );
   }
+
+  Future<void> _showAbout() => showDialog<void>(
+    context: context,
+    builder: (context) => AlertDialog(
+      scrollable: true,
+      title: const Text('关于 NEUQ One'),
+      content: const Text(
+        'NEUQ One 是面向东北大学秦皇岛分校学生的非官方开源校园工作台，学校的正式通知、成绩及业务办理均以官方系统为准。\n\n'
+        '如果您在使用过程中遇到问题，或有任何意见与建议，欢迎在 GitHub 提交 Issue，也欢迎通过 Pull Request（PR）参与开发，共同完善 NEUQ One。',
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('关闭'),
+        ),
+        TextButton(
+          onPressed: _repositoryUrl.isEmpty
+              ? null
+              : () => openOfficialPage(context, '$_repositoryUrl/issues'),
+          child: const Text('问题反馈'),
+        ),
+        TextButton(
+          onPressed: _repositoryUrl.isEmpty
+              ? null
+              : () => openOfficialPage(context, '$_repositoryUrl/pulls'),
+          child: const Text('参与贡献'),
+        ),
+      ],
+    ),
+  );
 
   Future<void> _showInfo(String title, String content) => showDialog<void>(
     context: context,
@@ -435,10 +449,15 @@ class _ProfileHeader extends StatelessWidget {
 }
 
 class _AccountCard extends StatelessWidget {
-  const _AccountCard({required this.status, required this.onLogout});
+  const _AccountCard({
+    required this.status,
+    required this.onLogout,
+    this.onReconnect,
+  });
 
   final SchoolConnection status;
   final VoidCallback? onLogout;
+  final Widget? onReconnect;
 
   @override
   Widget build(BuildContext context) {
@@ -447,49 +466,66 @@ class _AccountCard extends StatelessWidget {
       color: campusLime,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(19)),
       clipBehavior: Clip.antiAlias,
-      child: ListTile(
-        minTileHeight: 83,
-        contentPadding: const EdgeInsets.symmetric(horizontal: 12),
-        horizontalTitleGap: 13,
-        textColor: ink,
-        leading: const CampusIconBadge(
-          background: Color(0xFFBEDF50),
-          foreground: Color(0xFF354814),
-          size: 47,
-          child: Icon(Icons.verified_user_outlined),
-        ),
-        title: Text(switch (status) {
-          SchoolConnection.unavailable => '认证待接入',
-          SchoolConnection.disconnected => '未连接',
-          SchoolConnection.connected => '学校身份已验证',
-        }, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800)),
-        subtitle: const Padding(
-          padding: EdgeInsets.only(top: 3),
-          child: Text(
-            '统一身份认证',
-            style: TextStyle(color: Color(0xFF466020), fontSize: 12),
-          ),
-        ),
-        trailing: status != SchoolConnection.connected
-            ? null
-            : Tooltip(
-                message: '退出统一身份认证',
-                child: TextButton(
-                  onPressed: onLogout,
-                  style: TextButton.styleFrom(
-                    foregroundColor: ink,
-                    padding: const EdgeInsets.symmetric(horizontal: 2),
-                  ),
-                  child: const Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text('退出'),
-                      SizedBox(width: 3),
-                      Icon(Icons.logout_rounded, size: 17),
-                    ],
-                  ),
-                ),
+      child: Column(
+        children: [
+          ListTile(
+            minTileHeight: 83,
+            contentPadding: const EdgeInsets.symmetric(horizontal: 12),
+            horizontalTitleGap: 13,
+            textColor: ink,
+            leading: const CampusIconBadge(
+              background: Color(0xFFBEDF50),
+              foreground: Color(0xFF354814),
+              size: 47,
+              child: Icon(Icons.verified_user_outlined),
+            ),
+            title: Text(
+              switch (status) {
+                SchoolConnection.unavailable => '认证待接入',
+                SchoolConnection.disconnected => '未登录',
+                _ => '学校身份已验证',
+              },
+              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
+            ),
+            subtitle: Padding(
+              padding: const EdgeInsets.only(top: 3),
+              child: Text(
+                switch (status) {
+                  SchoolConnection.unavailable ||
+                  SchoolConnection.disconnected => '统一身份认证',
+                  SchoolConnection.connected => '教务会话正常',
+                  SchoolConnection.restoring => '正在恢复教务会话',
+                  SchoolConnection.expired => '教务会话已过期，请重新登录',
+                  SchoolConnection.offline => '教务连接失败，正在使用本地数据',
+                  SchoolConnection.unknown => '教务状态尚未确认',
+                },
+                style: const TextStyle(color: Color(0xFF466020), fontSize: 12),
               ),
+            ),
+            trailing: onLogout == null
+                ? null
+                : Tooltip(
+                    message: '退出统一身份认证',
+                    child: TextButton(
+                      onPressed: onLogout,
+                      style: TextButton.styleFrom(
+                        foregroundColor: ink,
+                        padding: const EdgeInsets.symmetric(horizontal: 2),
+                      ),
+                      child: const Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text('退出'),
+                          SizedBox(width: 3),
+                          Icon(Icons.logout_rounded, size: 17),
+                        ],
+                      ),
+                    ),
+                  ),
+          ),
+          if (onReconnect case final action?)
+            Padding(padding: const EdgeInsets.only(bottom: 8), child: action),
+        ],
       ),
     );
   }
@@ -504,6 +540,7 @@ class _ProfileTile extends StatelessWidget {
     this.onTap,
     this.trailing = Icons.chevron_right,
     this.loadingLabel,
+    this.trailingLabel,
   });
 
   final Widget icon;
@@ -513,6 +550,7 @@ class _ProfileTile extends StatelessWidget {
   final VoidCallback? onTap;
   final IconData trailing;
   final String? loadingLabel;
+  final String? trailingLabel;
 
   @override
   Widget build(BuildContext context) {
@@ -540,7 +578,18 @@ class _ProfileTile extends StatelessWidget {
                 style: TextStyle(fontSize: 11, color: colors.onSurfaceVariant),
               ),
         trailing: loadingLabel == null
-            ? Icon(trailing, size: 17, color: colors.onSurfaceVariant)
+            ? trailingLabel == null
+                  ? Icon(trailing, size: 17, color: colors.onSurfaceVariant)
+                  : ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 112),
+                      child: Text(
+                        trailingLabel!,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.labelMedium
+                            ?.copyWith(color: colors.primary),
+                      ),
+                    )
             : SizedBox.square(
                 dimension: 17,
                 child: CircularProgressIndicator(

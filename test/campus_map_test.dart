@@ -69,6 +69,42 @@ void main() {
   );
 
   test(
+    'clearing releases disk cache and an in-flight PNG cannot write it back',
+    () async {
+      final requested = Completer<void>();
+      final response = Completer<http.Response>();
+      var calls = 0;
+      final disk = repository((request) async {
+        if (++calls == 1) return _ok(_firstMap, '"first"');
+        if (calls == 2) {
+          expect(request.headers['if-none-match'], '"first"');
+          requested.complete();
+          return response.future;
+        }
+        expect(request.headers['if-none-match'], isNull);
+        return _ok(_updatedMap, '"second"');
+      });
+      final initial = await disk.refresh(null);
+      final personal = File.fromUri(directory.uri.resolve('personal.ics'));
+      await personal.writeAsString('synthetic export');
+      expect(
+        await disk.cacheBytes(),
+        await File.fromUri(directory.uri.resolve('neuq_one_campus_map.cache'))
+            .length(),
+      );
+      final downloading = disk.refresh(initial);
+      await requested.future;
+      await disk.clearCache();
+      response.complete(_ok(_updatedMap, '"second"'));
+      await downloading;
+      expect(await disk.cacheBytes(), 0);
+      expect(await disk.readCached(), isNull);
+      expect(await personal.readAsString(), 'synthetic export');
+      expect((await disk.load().single).etag, '"second"');
+    },
+  );
+
+  test(
     'keeps the old-site PNG offline and revalidates from the new origin',
     () async {
       var online = false;

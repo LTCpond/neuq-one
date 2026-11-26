@@ -2,7 +2,8 @@ name: Update app version manifest
 
 on:
   release:
-    types: [published]
+    types: [published, unpublished, edited, deleted]
+  workflow_dispatch:
   workflow_call:
     secrets:
       NEUQ_ASSETS_DISPATCH_TOKEN:
@@ -12,9 +13,7 @@ permissions: {}
 
 jobs:
   dispatch:
-    if: >-
-      github.repository == 'LTCpond/neuq-one' &&
-      (github.event_name != 'release' || (!github.event.release.prerelease && !github.event.release.draft))
+    if: github.repository == 'LTCpond/neuq-one'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

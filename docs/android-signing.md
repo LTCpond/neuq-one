@@ -22,6 +22,8 @@ flutter build apk --release --split-per-abi --no-pub
 
 手动分发前，对每个 APK 运行 `apksigner verify --print-certs <APK路径>`，并核对证书 SHA-256 指纹与正式 Keystore 中的证书一致。[Android apksigner 文档](https://developer.android.com/tools/apksigner)
 
+对每个 APK 运行 `python3 .github/actions/verify-android/verify_notifications.py <aapt2路径> <APK路径>`，检查缩减后的通知图标是否存在，并核对合并 Manifest 中的通知、重启、精确闹钟权限及接收器。Debug CI 和正式签名发布流程使用同一个检查脚本。系统通知送达、精确闹钟权限变更和重启恢复需在对应设备上验收。
+
 ## GitHub Actions Secrets
 
 | Secret | 内容 |

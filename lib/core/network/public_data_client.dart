@@ -5,6 +5,8 @@ import 'dart:typed_data';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http/http.dart' as http;
 
+import '../diagnostics/diagnostics.dart';
+
 final publicDataRoot = Uri.parse(
   const String.fromEnvironment(
     'NEUQ_ONE_DATA_ORIGIN',
@@ -88,6 +90,13 @@ class PublicDataClient {
     });
     try {
       return await _read(request, maxBytes).timeout(timeout);
+    } catch (error) {
+      diagnostics.record(
+        DiagnosticModule.publicData,
+        DiagnosticStage.request,
+        error: error,
+      );
+      rethrow;
     } finally {
       abort.complete();
     }

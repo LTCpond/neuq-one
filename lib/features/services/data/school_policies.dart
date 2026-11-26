@@ -9,6 +9,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path_provider/path_provider.dart';
 
 import '../../../core/network/public_data_client.dart';
+import '../../../core/diagnostics/diagnostics.dart';
+import '../../../core/storage/cache_files.dart';
+import '../../../core/storage/picker_cache.dart';
 import '../domain/school_policy.dart';
 
 final schoolPolicyRepositoryProvider = Provider<SchoolPolicyRepository>(
@@ -33,11 +36,13 @@ final schoolPolicyPdfProvider = FutureProvider.autoDispose
 final saveSchoolPolicyProvider = Provider<SchoolPolicySaver>(
   (ref) => (policy, bytes) async {
     final filename = policy.title.replaceAll(RegExp(r'[<>:"/\\|?*]'), '');
-    return await FilePicker.saveFile(
-          dialogTitle: '保存学校政策',
-          fileName: '$filename.pdf',
-          mimeType: 'application/pdf',
-          bytes: bytes,
+    return await pickerCache.run(
+          () => FilePicker.saveFile(
+            dialogTitle: '保存学校政策',
+            fileName: '$filename.pdf',
+            mimeType: 'application/pdf',
+            bytes: bytes,
+          ),
         ) !=
         null;
   },
@@ -49,7 +54,7 @@ typedef SchoolPolicySaver = Future<bool> Function(
 );
 
 class SchoolPolicyRepository {
-  const SchoolPolicyRepository(this._client, this._directory);
+  SchoolPolicyRepository(this._client, this._directory);
 
   static const _root = '/assets/policies';
   static const _index = 'index.json';
@@ -60,20 +65,34 @@ class SchoolPolicyRepository {
 
   final PublicDataClient _client;
   final Future<Directory> Function() _directory;
+  final _writes = CacheWrites();
+
+  Future<int> cacheBytes() async => cacheFileBytes(await _cacheDirectory());
+
+  Future<void> clearCache() => _writes.clear(() async {
+    await deleteCacheEntity(await _cacheDirectory());
+  });
 
   Stream<List<SchoolPolicy>> loadCatalog() async* {
+    final version = _writes.version;
     final cached = await _read(_index, _maxIndexBytes);
+    if (!_writes.current(version)) return;
     List<SchoolPolicy>? catalog;
     if (cached != null) {
       try {
         catalog = _parseCatalog(cached);
-      } on FormatException {
-        // Download a replacement for an unreadable cache.
+      } on FormatException catch (error) {
+        diagnostics.record(
+          DiagnosticModule.cache,
+          DiagnosticStage.decode,
+          error: error,
+        );
       }
     }
     if (catalog != null) yield catalog;
 
     try {
+      if (!_writes.current(version)) return;
       final response = await _client.getBytes(
         '$_root/$_index',
         source: PublicDataSource.assets,
@@ -85,15 +104,22 @@ class SchoolPolicyRepository {
       if (bytes == null) throw const FormatException('缺少学校政策目录');
       final updated = _parseCatalog(bytes);
       if (catalog == null || !listEquals(bytes, cached)) {
-        await _store(_index, bytes);
-        yield updated;
+        await _writes.write(version, () => _store(_index, bytes));
+        if (_writes.current(version)) yield updated;
       }
-    } catch (_) {
+    } catch (error) {
+      diagnostics.record(
+        DiagnosticModule.publicData,
+        DiagnosticStage.request,
+        error: error,
+      );
       if (catalog == null) rethrow;
     }
   }
 
   Future<Uint8List> loadPdf(SchoolPolicy policy) async {
+    final version = _writes.version;
+    if (version == null) throw const FormatException('正在清理学校政策缓存');
     final name = '${policy.id}.pdf';
     final cached = await _read(name, _maxPdfBytes);
     if (cached != null && _validPdf(cached, policy.sha256)) return cached;
@@ -110,7 +136,7 @@ class SchoolPolicyRepository {
     if (bytes == null || !_validPdf(bytes, policy.sha256)) {
       throw const FormatException('学校政策文件校验失败');
     }
-    await _store(name, bytes);
+    await _writes.write(version, () => _store(name, bytes));
     return bytes;
   }
 
@@ -161,9 +187,14 @@ class SchoolPolicyRepository {
   Future<Uint8List?> _read(String name, int maxBytes) async {
     try {
       final file = File.fromUri((await _cacheDirectory()).uri.resolve(name));
+      if (!await file.exists()) return null;
       if (await file.length() <= maxBytes) return await file.readAsBytes();
-    } catch (_) {
-      // Fetch the resource when storage is missing or unavailable.
+    } catch (error) {
+      diagnostics.record(
+        DiagnosticModule.cache,
+        DiagnosticStage.read,
+        error: error,
+      );
     }
     return null;
   }
@@ -180,8 +211,12 @@ class SchoolPolicyRepository {
         if (await temporary.exists()) await temporary.delete();
         await staging.delete();
       }
-    } catch (_) {
-      // Validated data can still be used when storage is unavailable.
+    } catch (error) {
+      diagnostics.record(
+        DiagnosticModule.cache,
+        DiagnosticStage.write,
+        error: error,
+      );
     }
   }
 }

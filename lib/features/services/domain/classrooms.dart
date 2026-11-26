@@ -22,6 +22,43 @@ const classroomPeriods = {
 
 enum ClassroomSlotStatus { success, stale, unavailable }
 
+enum ClassroomBuildingStatus { fresh, partial, historical, unavailable }
+
+({DateTime? updatedAt, ClassroomBuildingStatus status}) classroomBuildingAt(
+  Map<int, ClassroomSlot>? slots,
+  DateTime now,
+) {
+  DateTime? updatedAt;
+  var fresh = 0;
+  var historical = 0;
+  for (final period in classroomPeriods.keys) {
+    final slot = slots?[period];
+    switch (slot?.statusAt(now)) {
+      case ClassroomSlotStatus.success:
+        fresh++;
+      case ClassroomSlotStatus.stale:
+        historical++;
+      case ClassroomSlotStatus.unavailable || null:
+        continue;
+    }
+    final collected = slot?.collectedAt;
+    if (collected != null &&
+        (updatedAt == null || collected.isAfter(updatedAt))) {
+      updatedAt = collected;
+    }
+  }
+  return (
+    updatedAt: updatedAt,
+    status: switch ((fresh, historical)) {
+      (0, 0) => ClassroomBuildingStatus.unavailable,
+      (0, _) => ClassroomBuildingStatus.historical,
+      (final count, _) when count == classroomPeriods.length =>
+        ClassroomBuildingStatus.fresh,
+      _ => ClassroomBuildingStatus.partial,
+    },
+  );
+}
+
 typedef ClassroomRoomDetail = ({int? capacity, String? equipment});
 
 class ClassroomSlot {

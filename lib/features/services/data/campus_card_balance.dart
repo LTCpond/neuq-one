@@ -7,6 +7,8 @@ import 'package:webview_flutter/webview_flutter.dart';
 
 import '../../../core/auth/neuq_login_protocol.dart';
 import '../../../core/auth/school_auth.dart';
+import '../../../core/diagnostics/diagnostics.dart';
+import '../../../core/network/neuq_client.dart' show schoolFailureCode;
 import 'campus_card_protocol.dart';
 
 typedef CampusCardBalance = ({int cents, DateTime readAt});
@@ -39,7 +41,12 @@ class CampusCardRepository {
       final date = DateTime.tryParse(data['readAt'] as String);
       if (date == null || !validCampusCardCents(cents)) return null;
       return (cents: cents, readAt: date.toUtc());
-    } on FormatException {
+    } on FormatException catch (error) {
+      diagnostics.record(
+        DiagnosticModule.campusCard,
+        DiagnosticStage.decode,
+        error: error,
+      );
       return null;
     }
   }
@@ -75,7 +82,13 @@ class CampusCardRepository {
       final callback = await request(login)
           .timeout(const Duration(seconds: 15));
       return _disposed ? null : callback;
-    } catch (_) {
+    } catch (error) {
+      diagnostics.record(
+        DiagnosticModule.campusCard,
+        DiagnosticStage.renew,
+        code: error is SchoolRequestFailure ? schoolFailureCode(error) : null,
+        error: error,
+      );
       return null;
     }
   }
@@ -112,7 +125,12 @@ class CampusCardRepository {
             fail(error);
             return;
           }
-        } catch (_) {
+        } catch (error) {
+          diagnostics.record(
+            DiagnosticModule.campusCard,
+            DiagnosticStage.decode,
+            error: error,
+          );
           if (currentNavigation == navigation) {
             fail(CampusCardReadFailure.unreadable);
           }
@@ -133,7 +151,12 @@ class CampusCardRepository {
       waitingForSchoolSignIn = false;
       try {
         await controller.loadRequest(callback ?? login);
-      } catch (_) {
+      } catch (error) {
+        diagnostics.record(
+          DiagnosticModule.campusCard,
+          DiagnosticStage.request,
+          error: error,
+        );
         fail(CampusCardReadFailure.unreadable);
       }
     }
@@ -172,6 +195,12 @@ class CampusCardRepository {
         },
         onWebResourceError: (error) {
           if (!waitingForSchoolSignIn && error.isForMainFrame != false) {
+            diagnostics.record(
+              DiagnosticModule.campusCard,
+              DiagnosticStage.request,
+              code: DiagnosticCode.network,
+              error: error,
+            );
             fail(CampusCardReadFailure.unreadable);
           }
         },
@@ -182,6 +211,11 @@ class CampusCardRepository {
     final balance = await result.future.timeout(
       const Duration(seconds: 25),
       onTimeout: () {
+        diagnostics.record(
+          DiagnosticModule.campusCard,
+          DiagnosticStage.request,
+          code: DiagnosticCode.timeout,
+        );
         fail(CampusCardReadFailure.unreadable);
         return null;
       },
@@ -226,10 +260,23 @@ final campusCardRefreshProvider =
         if (ref.mounted) ref.invalidate(campusCardBalanceProvider);
         return CampusCardRefreshStatus.updated;
       } on CampusCardReadFailure catch (error) {
+        diagnostics.record(
+          DiagnosticModule.campusCard,
+          DiagnosticStage.sync,
+          code: error == CampusCardReadFailure.unreadable
+              ? DiagnosticCode.invalidData
+              : DiagnosticCode.sessionExpired,
+          error: error,
+        );
         return error == CampusCardReadFailure.unreadable
             ? CampusCardRefreshStatus.unavailable
             : CampusCardRefreshStatus.signInRequired;
-      } catch (_) {
+      } catch (error) {
+        diagnostics.record(
+          DiagnosticModule.campusCard,
+          DiagnosticStage.sync,
+          error: error,
+        );
         return CampusCardRefreshStatus.unavailable;
       }
     }, retry: (_, _) => null);
