@@ -98,9 +98,20 @@ class Classrooms extends Notifier<ClassroomsState> {
     _lastAttempt = now;
     state = ClassroomsState(snapshot: previous, isLoading: true);
 
+    final cached = _cached;
+    final resource = Uri.tryParse(cached?.resource ?? '');
+    final validators = resource != null && resource.hasAuthority
+        ? PublicDataValidators(
+            resource,
+            etag: cached?.etag,
+            lastModified: cached?.lastModified,
+          )
+        : null;
     final response = await _fetch(
       force || newDay || previousAttempt != null,
       previous,
+      validators,
+      clock,
     );
     if (!current()) return;
     if (response == null) {
@@ -108,21 +119,22 @@ class Classrooms extends Notifier<ClassroomsState> {
       state = ClassroomsState(snapshot: previous, refreshFailed: true);
       return;
     }
-    final (snapshot, payload, headers, notModified) = response;
+    final (payload, snapshot) = response.body ?? (cached!.payload, previous!);
+    final headers = response.headers;
+    final updatedValidators = response.validators(previous: validators);
     _consecutiveFailures = 0;
     final checkedAt = clock().toUtc();
     final cacheControl =
         headers['cache-control'] ??
-        (notModified ? _cached?.cacheControl : null);
+        (response.notModified ? cached?.cacheControl : null);
     final policy = _cachePolicy(cacheControl);
     final entry = ClassroomCacheEntry(
       id: 1,
       payload: payload,
       checkedAt: checkedAt,
-      etag: headers['etag'] ?? (notModified ? _cached?.etag : null),
-      lastModified:
-          headers['last-modified'] ??
-          (notModified ? _cached?.lastModified : null),
+      resource: updatedValidators.resource.toString(),
+      etag: updatedValidators.etag,
+      lastModified: updatedValidators.lastModified,
       cacheControl: cacheControl,
       freshUntil: _serverFreshUntil(headers, policy, checkedAt),
     );
@@ -144,44 +156,53 @@ class Classrooms extends Notifier<ClassroomsState> {
     }
   }
 
-  Future<(ClassroomWeek, String, Map<String, String>, bool)?> _fetch(
+  Future<PublicDataResponse<(String, ClassroomWeek)>?> _fetch(
     bool revalidate,
     ClassroomWeek? previous,
+    PublicDataValidators? validators,
+    DateTime Function() clock,
   ) async {
     try {
-      final response = await ref
+      return await ref
           .read(publicDataClientProvider)
           .getJson(
             _path,
             source: PublicDataSource.data,
-            etag: _cached?.etag,
-            lastModified: _cached?.lastModified,
+            validators: validators,
+            canReuseCache: () =>
+                previous != null && _hasCurrentSlots(previous, clock().toUtc()),
             revalidate: revalidate,
+            decode: (body) {
+              final parsed = readClassroomWeek(body);
+              final now = clock().toUtc();
+              if (parsed.generatedAt.isAfter(
+                    now.add(const Duration(minutes: 5)),
+                  ) ||
+                  !_hasCurrentSlots(parsed, now)) {
+                throw const FormatException('空教室快照不在有效期内');
+              }
+              if (previous != null &&
+                  parsed.generatedAt.isBefore(previous.generatedAt)) {
+                throw const FormatException('空教室快照早于当前数据');
+              }
+              return (body, parsed);
+            },
           );
-      final body = response.body;
-      if (body == null) {
-        final cached = _cached;
-        if (cached == null || previous == null) {
-          throw const FormatException('缺少空教室缓存');
-        }
-        return (previous, cached.payload, response.headers, true);
-      }
-      final parsed = readClassroomWeek(body);
-      if (previous != null &&
-          parsed.generatedAt.isBefore(previous.generatedAt)) {
-        throw const FormatException('空教室快照早于当前数据');
-      }
-      return (parsed, body, response.headers, false);
-    } catch (error) {
-      diagnostics.record(
-        DiagnosticModule.publicData,
-        error is FormatException
-            ? DiagnosticStage.decode
-            : DiagnosticStage.request,
-        error: error,
-      );
+    } on PublicDataException {
       return null;
     }
+  }
+
+  bool _hasCurrentSlots(ClassroomWeek snapshot, DateTime now) {
+    final today = campusDateAt(now);
+    return snapshot.days.containsKey(today) &&
+        snapshot.days.entries.any(
+          (day) =>
+              !day.key.isBefore(today) &&
+              day.value.buildings.values.any(
+                (slots) => slots.values.any((slot) => slot.isFreshAt(now)),
+              ),
+        );
   }
 
   bool _shouldRefresh(

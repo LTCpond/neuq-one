@@ -60,7 +60,9 @@ flutter build apk --debug
 flutter build apk --debug --dart-define=NEUQ_ONE_REPOSITORY_URL=https://github.com/your-account/your-repo
 ```
 
-空教室从 `https://neuq-one-data.pages.dev` 读取。地图、政策和 App 版本清单从 `https://neuq-one-assets.pages.dev` 读取。构建时可分别用 `NEUQ_ONE_DATA_ORIGIN` 和 `NEUQ_ONE_ASSETS_ORIGIN` 覆盖根地址。请按设备架构下载正式 Android 安装包，常见的 64 位 ARM 手机使用 `arm64-v8a`。[公共数据接口](docs/public-data.md) · [GitHub Releases](https://github.com/LTCpond/neuq-one/releases)
+空教室、校园地图、学校政策和 App 版本清单优先从 Azure Static Web Apps 读取，发生故障时切换到 Cloudflare Pages。空教室和静态资源各自配置主备地址。双源都无法提供可用数据时，空教室、地图和政策目录继续显示已验证的本地缓存，并标明离线状态及更新时间。构建时可通过四个 `dart-define` 覆盖地址，正式构建也支持同名 GitHub Actions 仓库变量。[公共数据接口与构建参数](docs/public-data.md)
+
+请按设备架构下载 Android 安装包，常见的 64 位 ARM 手机使用 `arm64-v8a`。[GitHub Releases](https://github.com/LTCpond/neuq-one/releases)
 
 ## 开发与验证
 

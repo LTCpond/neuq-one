@@ -237,10 +237,12 @@ class AppUpdateCoordinator {
       await _saveState();
       return result;
     } catch (error) {
+      final requestCode = error is PublicDataException ? error.code : null;
       _updateLog(
-        error is FormatException
+        error is FormatException || requestCode == DiagnosticCode.invalidData
             ? DiagnosticStage.decode
             : DiagnosticStage.request,
+        code: requestCode,
         error: error,
       );
       rethrow;
@@ -508,18 +510,37 @@ class AppUpdatesRepository {
       source: PublicDataSource.assets,
       revalidate: true,
       maxBytes: maxManifestBytes,
+      decode: _readManifest,
     );
-    final body = response.body;
-    if (body == null) throw const FormatException('缺少 App 版本信息');
-    final json = jsonDecode(body);
-    if (json case {'schemaVersion': 1, 'release': final stable}) {
+    _updateLog(
+      DiagnosticStage.check,
+      level: DiagnosticSeverity.debug,
+      code: channel == AppUpdateChannel.beta
+          ? DiagnosticCode.betaChannel
+          : DiagnosticCode.stableChannel,
+    );
+    final latest = response.body;
+    if (latest == null) {
       _updateLog(
         DiagnosticStage.check,
-        level: DiagnosticSeverity.debug,
-        code: channel == AppUpdateChannel.beta
-            ? DiagnosticCode.betaChannel
-            : DiagnosticCode.stableChannel,
+        code: DiagnosticCode.noPublishedRelease,
+        level: DiagnosticSeverity.info,
       );
+      return const NoPublishedAppRelease();
+    }
+    final installed = await installedVersion();
+    final newer = _compareVersions(latest.version, installed) > 0;
+    _updateLog(
+      DiagnosticStage.check,
+      code: newer ? DiagnosticCode.updateAvailable : DiagnosticCode.upToDate,
+      level: DiagnosticSeverity.info,
+    );
+    return newer ? latest.forInstalled(installed) : const AppUpToDate();
+  }
+
+  _AppRelease? _readManifest(String body) {
+    final json = jsonDecode(body);
+    if (json case {'schemaVersion': 1, 'release': final stable}) {
       var latest = stable == null
           ? null
           : _AppRelease.read(stable, expectedPrerelease: false);
@@ -532,22 +553,7 @@ class AppUpdatesRepository {
           latest = candidate;
         }
       }
-      if (latest == null) {
-        _updateLog(
-          DiagnosticStage.check,
-          code: DiagnosticCode.noPublishedRelease,
-          level: DiagnosticSeverity.info,
-        );
-        return const NoPublishedAppRelease();
-      }
-      final installed = await installedVersion();
-      final newer = _compareVersions(latest.version, installed) > 0;
-      _updateLog(
-        DiagnosticStage.check,
-        code: newer ? DiagnosticCode.updateAvailable : DiagnosticCode.upToDate,
-        level: DiagnosticSeverity.info,
-      );
-      return newer ? latest.forInstalled(installed) : const AppUpToDate();
+      return latest;
     }
     throw const FormatException('App 版本信息格式错误');
   }

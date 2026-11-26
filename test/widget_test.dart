@@ -893,7 +893,7 @@ void main() {
       expect(find.text('11月26日 · 星期四'), findsOneWidget);
       expect(find.text('101'), findsNothing);
       expect(find.text('301'), findsWidgets);
-      expect(find.text('更新失败，正在显示上次数据'), findsOneWidget);
+      expect(find.text('更新失败，正在显示离线缓存'), findsOneWidget);
       expect(midnightReads, 2);
 
       await tester.tap(find.byType(DropdownButton<DateTime>));
@@ -907,9 +907,13 @@ void main() {
       await tester.pumpAndSettle();
       expect(midnightReads, 3);
     },
-    classroomResponse: () => ++midnightReads == 1
-        ? http.Response.bytes(utf8.encode(classroomWeekBody()), 200)
-        : http.Response('', 503),
+    classroomResponse: () {
+      if (++midnightReads > 1) return http.Response('', 503);
+      final week = classroomWeekFixture();
+      fixtureDay(week, 1)['buildings']['工学馆']['1-2']['expiresAt'] =
+          '2026-11-26T00:30:00+08:00';
+      return http.Response.bytes(utf8.encode(jsonEncode(week)), 200);
+    },
     classroomClock: () => classroomTime,
   );
 
@@ -1131,14 +1135,18 @@ void _appTest(
               classroomClock ?? () => classroomNow,
             ),
             publicDataClientProvider.overrideWithValue(
-              PublicDataClient(classroomClient),
+              PublicDataClient(
+                classroomClient,
+                dataBackupOrigin: publicDataRoot,
+                cooldown: Duration.zero,
+              ),
             ),
             campusMapProvider.overrideWith(
               (ref) => Stream.error(const FormatException()),
             ),
             if (schoolPolicies != null)
               schoolPoliciesProvider.overrideWith(
-                (ref) => Stream.value(schoolPolicies),
+                (ref) => Stream.value(SchoolPolicyCatalog(schoolPolicies)),
               ),
             if (schoolPolicyPdf != null)
               schoolPolicyPdfProvider.overrideWith(

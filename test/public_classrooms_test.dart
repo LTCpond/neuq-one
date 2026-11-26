@@ -231,7 +231,7 @@ void main() {
         expect(request.method, 'GET');
         expect(
           request.url,
-          publicDataRoot.replace(path: '/api/v1/classrooms/week.json'),
+          publicDataRoot.replace(path: '/data/v1/classrooms/week.json'),
         );
         expect(request.followRedirects, isFalse);
         expect(
@@ -307,17 +307,21 @@ void main() {
           .rooms,
       contains('101'),
     );
-    now = DateTime.utc(2026, 11, 25, 9, 19);
+    now = DateTime.utc(2026, 11, 25, 9, 18, 59);
     await controller.refresh(force: true);
     expect(calls, 1);
     expect(reopened.read(classroomsProvider).snapshot, same(restored));
     final saved = (await cache.readWeek())!;
     expect(saved.etag, etag);
+    expect(
+      saved.resource,
+      'https://${publicDataRoot.host}/data/v1/classrooms/week.json',
+    );
     expect(saved.payload, classroomWeekBody());
     expect(saved.freshUntil!.toUtc(), now.add(const Duration(seconds: 50)));
     expect(
       restored.days[classroomToday]!.buildings[CampusBuilding.engineering]![1]!
-          .statusAt(now),
+          .statusAt(now.add(const Duration(seconds: 1))),
       ClassroomSlotStatus.stale,
     );
   });
@@ -392,6 +396,140 @@ void main() {
   });
 
   test(
+    'a valid but older mirror cannot replace the latest cached snapshot',
+    () async {
+      var refreshing = false;
+      final cache = ClassroomCache(NativeDatabase.memory());
+      addTearDown(cache.close);
+      final requests = <http.Request>[];
+      final scope = _scope(
+        (request) async {
+          requests.add(request);
+          if (!refreshing) return _json(headers: {'etag': '"latest"'});
+          if (request.url.host == publicDataRoot.host) {
+            return http.Response('', 503);
+          }
+          return _json(
+            body: classroomWeekBody().replaceFirst(
+              '16:19:12.440823154',
+              '16:19:05',
+            ),
+            headers: {'etag': '"older"'},
+          );
+        },
+        cache: cache,
+        dualSource: true,
+      );
+      final controller = scope.read(classroomsProvider.notifier);
+      await controller.refresh();
+      final original = scope.read(classroomsProvider).snapshot;
+      refreshing = true;
+      await controller.refresh(force: true);
+      expect(requests[1].headers['if-none-match'], '"latest"');
+      expect(
+        requests[2].url,
+        publicDataBackupRoot.resolve('/api/v1/classrooms/week.json'),
+      );
+      expect(requests[2].headers['if-none-match'], isNull);
+      expect(scope.read(classroomsProvider).refreshFailed, isTrue);
+      expect(scope.read(classroomsProvider).snapshot, same(original));
+      expect((await cache.readWeek())!.etag, '"latest"');
+    },
+  );
+
+  for (final status in [200, 304]) {
+    test(
+      'tries the mirror when the primary snapshot has expired (HTTP $status)',
+      () async {
+        var now = classroomNow;
+        final cache = ClassroomCache(NativeDatabase.memory());
+        addTearDown(cache.close);
+        final requests = <http.Request>[];
+        final scope = _scope(
+          (request) async {
+            requests.add(request);
+            if (requests.length == 1) {
+              return _json(headers: {'etag': '"primary"'});
+            }
+            if (request.url.host == publicDataRoot.host) {
+              return status == 200 ? _json() : http.Response('', 304);
+            }
+            return _json(
+              body: classroomWeekBody()
+                  .replaceFirst('16:19:12.440823154', '16:19:13')
+                  .replaceAll('17:19:00', '18:19:00'),
+              headers: {'etag': '"mirror"'},
+            );
+          },
+          cache: cache,
+          clock: () => now,
+          dualSource: true,
+        );
+        final controller = scope.read(classroomsProvider.notifier);
+        await controller.refresh();
+        now = now.add(const Duration(hours: 1));
+        await controller.refresh(force: true);
+        expect(requests.map((request) => request.url.host), [
+          publicDataRoot.host,
+          publicDataRoot.host,
+          publicDataBackupRoot.host,
+        ]);
+        expect(
+          requests.every((request) => request.headers['if-none-match'] == null),
+          isTrue,
+        );
+        expect(scope.read(classroomsProvider).refreshFailed, isFalse);
+        final entry = (await cache.readWeek())!;
+        expect(entry.resource, requests.last.url.toString());
+        expect(entry.etag, '"mirror"');
+      },
+    );
+  }
+
+  test(
+    'migrates the offline cache and leaves unscoped validators unused',
+    () async {
+      final cache = ClassroomCache(
+        NativeDatabase.memory(
+          setup: (db) {
+            db.execute('''
+        CREATE TABLE classroom_cache_entries (
+          id INTEGER NOT NULL PRIMARY KEY, payload TEXT NOT NULL,
+          checked_at INTEGER NOT NULL, etag TEXT, last_modified TEXT,
+          cache_control TEXT, fresh_until INTEGER
+        )
+      ''');
+            db.execute(
+              'INSERT INTO classroom_cache_entries VALUES (1, ?, ?, ?, ?, NULL, NULL)',
+              [
+                classroomWeekBody(),
+                classroomNow.millisecondsSinceEpoch ~/ 1000,
+                '"old"',
+                'Wed, 25 Nov 2026 08:19:12 GMT',
+              ],
+            );
+            db.execute('PRAGMA user_version = 1');
+          },
+        ),
+      );
+      addTearDown(cache.close);
+      final scope = _scope(
+        (request) async {
+          expect(request.headers['if-none-match'], isNull);
+          expect(request.headers['if-modified-since'], isNull);
+          return http.Response('', 503);
+        },
+        cache: cache,
+        dualSource: true,
+      );
+      await scope.read(classroomsProvider.notifier).refresh(force: true);
+      expect(scope.read(classroomsProvider).snapshot, isNotNull);
+      expect(scope.read(classroomsProvider).refreshFailed, isTrue);
+      expect((await cache.readWeek())!.resource, isNull);
+    },
+  );
+
+  test(
     'clearing while a conditional GET runs drops its result and the validators',
     () async {
       final cache = ClassroomCache(NativeDatabase.memory());
@@ -434,7 +572,7 @@ void main() {
   test(
     'Beijing midnight revalidates once and cached days match exactly',
     () async {
-      var now = DateTime.utc(2026, 11, 25, 15, 59);
+      var now = classroomNow;
       var count = 0;
       final scope = _scope(
         (_) async => ++count == 1 ? _json() : http.Response('', 503),
@@ -444,7 +582,7 @@ void main() {
       await controller.refresh();
       final first = scope.read(classroomsProvider).snapshot!;
       expect(campusDateAt(now), classroomToday);
-      now = now.add(const Duration(minutes: 1));
+      now = DateTime.utc(2026, 11, 25, 16);
       final tomorrow = campusDateAt(now);
       expect(tomorrow, DateTime.utc(2026, 11, 26));
       await controller.refresh();
@@ -461,16 +599,18 @@ void main() {
   );
 }
 
-http.Response _json({Map<String, String>? headers}) => http.Response.bytes(
-  utf8.encode(classroomWeekBody()),
-  200,
-  headers: headers ?? const {},
-);
+http.Response _json({Map<String, String>? headers, String? body}) =>
+    http.Response.bytes(
+      utf8.encode(body ?? classroomWeekBody()),
+      200,
+      headers: headers ?? const {},
+    );
 
 ProviderContainer _scope(
   Future<http.Response> Function(http.Request) handler, {
   DateTime Function()? clock,
   ClassroomCache? cache,
+  bool dualSource = false,
 }) {
   final db = cache ?? ClassroomCache(NativeDatabase.memory());
   if (cache == null) addTearDown(db.close);
@@ -480,7 +620,13 @@ ProviderContainer _scope(
     overrides: [
       classroomCacheProvider.overrideWithValue(db),
       classroomsClockProvider.overrideWithValue(clock ?? () => classroomNow),
-      publicDataClientProvider.overrideWithValue(PublicDataClient(client)),
+      publicDataClientProvider.overrideWithValue(
+        PublicDataClient(
+          client,
+          dataBackupOrigin: dualSource ? publicDataBackupRoot : publicDataRoot,
+          cooldown: dualSource ? const Duration(seconds: 45) : Duration.zero,
+        ),
+      ),
       schoolSessionProvider.overrideWith(
         () => throw StateError('unexpected session access'),
       ),

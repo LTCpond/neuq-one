@@ -210,8 +210,13 @@ class _ClassroomsPageState extends ConsumerState<ClassroomsPage> {
                 building.status == ClassroomBuildingStatus.unavailable)
               Text('此楼栋所选日期的时段数据均不可用', style: caption),
             if (state.isLoading) Text('正在更新空教室数据', style: caption),
-            if (state.refreshFailed && slots != null)
-              Text('更新失败，正在显示上次数据', style: caption),
+            if (state.refreshFailed && state.snapshot != null)
+              Text(
+                updated != null
+                    ? '更新失败，正在显示离线缓存'
+                    : '更新失败，离线快照生成于 ${_collectionTime(state.snapshot!.generatedAt)}',
+                style: caption,
+              ),
             const SizedBox(height: 10),
             if (slots != null)
               ..._schedule(

@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:material_ui/material_ui.dart';
 
+import '../../../core/time/campus_clock.dart';
 import '../data/campus_map.dart';
 
 class CampusMapPage extends ConsumerStatefulWidget {
@@ -104,6 +105,22 @@ class _CampusMapPageState extends ConsumerState<CampusMapPage> {
                   ),
                 ),
               ),
+              if (!_fullscreen && map.asData?.value.isOffline == true)
+                Positioned(
+                  top: 8,
+                  left: 12,
+                  right: 12,
+                  child: Card(
+                    child: Padding(
+                      padding: const EdgeInsets.all(8),
+                      child: Text(switch (map.asData?.value.updatedAt) {
+                        final updatedAt? =>
+                          '离线缓存 · 更新于 ${campusDateTimeLabel(updatedAt)}',
+                        null => '离线缓存',
+                      }, textAlign: TextAlign.center),
+                    ),
+                  ),
+                ),
               if (_fullscreen)
                 Positioned(
                   top: 12,

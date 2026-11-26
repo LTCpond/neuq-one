@@ -53,7 +53,8 @@ void main() {
         _ => throw StateError('Unexpected resource ${request.url.path}'),
       };
     });
-    final policy = (await online.loadCatalog().single).single;
+    final initialCatalog = await online.loadCatalog().single;
+    final policy = initialCatalog.policies.single;
     expect(await online.loadPdf(policy), pdf);
 
     var requests = 0;
@@ -61,10 +62,13 @@ void main() {
       requests++;
       return http.Response('', 503);
     });
-    final savedPolicy = (await offline.loadCatalog().single).single;
+    final saved = await offline.loadCatalog().last;
+    final savedPolicy = saved.policies.single;
     expect(savedPolicy.title, policy.title);
+    expect(saved.isOffline, isTrue);
+    expect(saved.updatedAt, initialCatalog.updatedAt);
     expect(await offline.loadPdf(savedPolicy), pdf);
-    expect(requests, 1);
+    expect(requests, 2);
   });
 
   test(
@@ -81,25 +85,85 @@ void main() {
               )
             : http.Response.bytes(file, 200);
       });
-      final original = (await repositoryUnderTest.loadCatalog().single).single;
+      final original =
+          (await repositoryUnderTest.loadCatalog().single).policies.single;
       await repositoryUnderTest.loadPdf(original);
 
       index = catalog(pdf, id: '../grade-point');
       expect(
-        (await repositoryUnderTest.loadCatalog().single).single.id,
+        (await repositoryUnderTest.loadCatalog().last).policies.single.id,
         original.id,
       );
 
       index = catalog(updatedPdf);
-      final updated = (await repositoryUnderTest.loadCatalog().last).single;
+      final updated =
+          (await repositoryUnderTest.loadCatalog().last).policies.single;
       await expectLater(
         repositoryUnderTest.loadPdf(updated),
-        throwsFormatException,
+        throwsA(isA<PublicDataException>()),
       );
       expect(await repositoryUnderTest.loadPdf(original), pdf);
 
       file = updatedPdf;
       expect(await repositoryUnderTest.loadPdf(updated), updatedPdf);
+    },
+  );
+
+  test(
+    'mirror catalog validators and PDF hashes survive a source change',
+    () async {
+      var refreshed = false;
+      var mirrorNotModified = false;
+      final requests = <http.Request>[];
+      final disk = repository((request) async {
+        requests.add(request);
+        final isPrimary = request.url.host == publicAssetsRoot.host;
+        if (request.url.path.endsWith('index.json')) {
+          if (!refreshed) {
+            return http.Response.bytes(
+              utf8.encode(catalog(pdf)),
+              200,
+              headers: {
+                'etag': '"primary"',
+                'last-modified': 'Wed, 25 Nov 2026 08:19:12 GMT',
+              },
+            );
+          }
+          if (isPrimary) return http.Response('<html>', 200);
+          if (mirrorNotModified) return http.Response('', 304);
+          return http.Response.bytes(
+            utf8.encode(catalog(updatedPdf)),
+            200,
+            headers: {'etag': '"mirror"'},
+          );
+        }
+        return http.Response.bytes(isPrimary ? pdf : updatedPdf, 200);
+      });
+      final original = (await disk.loadCatalog().single).policies.single;
+      expect(await disk.loadPdf(original), pdf);
+      refreshed = true;
+      final updated = (await disk.loadCatalog().last).policies.single;
+      expect(requests[2].headers['if-none-match'], '"primary"');
+      expect(requests[2].headers['if-modified-since'], isNotNull);
+      expect(requests[3].headers['if-none-match'], isNull);
+      expect(requests[3].headers['if-modified-since'], isNull);
+      expect(await disk.loadPdf(updated), updatedPdf);
+      expect(requests.skip(4).map((request) => request.url.host), [
+        publicAssetsRoot.host,
+        publicAssetsBackupRoot.host,
+      ]);
+
+      mirrorNotModified = true;
+      expect(
+        (await disk.loadCatalog().single).policies.single.sha256,
+        updated.sha256,
+      );
+      expect(requests[6].headers['if-none-match'], isNull);
+      expect(requests[7].headers['if-none-match'], '"mirror"');
+
+      final offline = repository((_) async => http.Response('', 503));
+      expect(await offline.loadPdf(original), pdf);
+      expect(await offline.loadPdf(updated), updatedPdf);
     },
   );
 }

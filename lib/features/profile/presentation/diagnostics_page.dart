@@ -16,6 +16,9 @@ class _DiagnosticsPageState extends State<DiagnosticsPage> {
     entry.time.toIso8601String(),
     entry.level.name.toUpperCase(),
     '${entry.module.name}.${entry.stage.name}.${entry.code.name}',
+    ?entry.endpoint?.name,
+    if (entry.elapsedMs case final ms?) '${ms}ms',
+    if (entry.httpStatus case final status?) 'HTTP $status',
     ?entry.exceptionType,
   ].join(' ');
 
@@ -27,7 +30,7 @@ class _DiagnosticsPageState extends State<DiagnosticsPage> {
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          const Text('最多保留本次运行的 150 条诊断记录。记录仅含时间、操作和错误分类。'),
+          const Text('最多保留本次运行的 150 条诊断记录，包括操作、错误分类、公共数据源和请求耗时。'),
           Wrap(
             spacing: 8,
             children: [

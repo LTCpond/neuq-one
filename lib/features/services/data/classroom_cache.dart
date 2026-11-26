@@ -11,6 +11,7 @@ class ClassroomCacheEntries extends Table {
   IntColumn get id => integer()();
   TextColumn get payload => text()();
   DateTimeColumn get checkedAt => dateTime()();
+  TextColumn get resource => text().nullable()();
   TextColumn get etag => text().nullable()();
   TextColumn get lastModified => text().nullable()();
   TextColumn get cacheControl => text().nullable()();
@@ -27,7 +28,19 @@ class ClassroomCache extends _$ClassroomCache {
     : super(executor ?? driftDatabase(name: 'neuq_one_public_classrooms'));
 
   @override
-  int get schemaVersion => 1;
+  int get schemaVersion => 2;
+
+  @override
+  MigrationStrategy get migration => MigrationStrategy(
+    onUpgrade: (migrator, from, to) async {
+      if (from < 2) {
+        await migrator.addColumn(
+          classroomCacheEntries,
+          classroomCacheEntries.resource,
+        );
+      }
+    },
+  );
 
   Future<ClassroomCacheEntry?> readWeek() => (select(
     classroomCacheEntries,
@@ -40,9 +53,16 @@ class ClassroomCache extends _$ClassroomCache {
   Future<int> cacheBytes() async {
     final row = await readWeek();
     if (row == null) return 0;
-    return [row.payload, row.etag, row.lastModified, row.cacheControl]
-        .whereType<String>()
-        .fold<int>(0, (sum, value) => sum + utf8.encode(value).length);
+    return [
+      row.payload,
+      row.resource,
+      row.etag,
+      row.lastModified,
+      row.cacheControl,
+    ].whereType<String>().fold<int>(
+      0,
+      (sum, value) => sum + utf8.encode(value).length,
+    );
   }
 
   Future<void> removeWeek() async {

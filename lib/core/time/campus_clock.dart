@@ -17,3 +17,8 @@ String weekdayLabel(int weekday) => '周${'一二三四五六日'[weekday - 1]}'
 
 String clockLabel(int minutes) =>
     '${(minutes ~/ 60).toString().padLeft(2, '0')}:${(minutes % 60).toString().padLeft(2, '0')}';
+
+String campusDateTimeLabel(DateTime instant) {
+  final time = instant.toUtc().add(campusOffset);
+  return '${shortDate(time)} ${clockLabel(time.hour * 60 + time.minute)}';
+}

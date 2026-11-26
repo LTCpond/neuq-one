@@ -14,6 +14,7 @@ import 'package:neuq_one/app/login_page.dart';
 import 'package:neuq_one/core/database/app_database.dart';
 import 'package:neuq_one/core/database/school_data.dart';
 import 'package:neuq_one/core/auth/school_auth.dart';
+import 'package:neuq_one/core/diagnostics/diagnostics.dart';
 import 'package:neuq_one/core/network/public_data_client.dart';
 import 'package:neuq_one/core/storage/settings.dart';
 import 'package:neuq_one/core/theme/app_theme.dart';
@@ -44,7 +45,9 @@ void main() {
       return _manifest(release);
     });
     addTearDown(client.close);
-    return AppUpdatesRepository(PublicDataClient(client));
+    return AppUpdatesRepository(
+      PublicDataClient(client, assetsBackupOrigin: publicAssetsRoot),
+    );
   }
 
   test('compares stable release versions numerically', () async {
@@ -88,7 +91,7 @@ void main() {
     );
     now = now.add(const Duration(minutes: 59));
     expect(await launch().check(automatic: true), isNull);
-    expect(requests, 1);
+    expect(requests, 2);
     now = now.add(const Duration(minutes: 1));
     await expectLater(
       launch().check(automatic: true),
@@ -96,7 +99,7 @@ void main() {
     );
     now = now.add(const Duration(minutes: 119));
     expect(await launch().check(automatic: true), isNull);
-    expect(requests, 2);
+    expect(requests, 4);
     now = now.add(const Duration(minutes: 1));
     networkAvailable = true;
     expect(await launch().check(automatic: true), isA<NoPublishedAppRelease>());
@@ -106,10 +109,10 @@ void main() {
       await launch().check(automatic: false),
       isA<NoPublishedAppRelease>(),
     );
-    expect(requests, 4);
+    expect(requests, 6);
     now = now.add(const Duration(hours: 24));
     expect(await launch().check(automatic: true), isA<NoPublishedAppRelease>());
-    expect(requests, 5);
+    expect(requests, 7);
   });
 
   test(
@@ -179,7 +182,9 @@ void main() {
     var response = _manifest(_release(latest, changelog: ['更新摘要']));
     final client = MockClient((_) async => response);
     addTearDown(client.close);
-    final repository = AppUpdatesRepository(PublicDataClient(client));
+    final repository = AppUpdatesRepository(
+      PublicDataClient(client, cooldown: Duration.zero),
+    );
     AppUpdateCoordinator launch() => AppUpdateCoordinator(repository, prefs);
     await launch().checkAtStartup();
     final offline = launch();
@@ -444,9 +449,38 @@ void main() {
     await expectLater(
       repository({'version': '1.0.0', 'url': 'https://example.test/update.apk'})
           .checkForUpdate(),
-      throwsFormatException,
+      _manifestFailure(DiagnosticCode.invalidData),
     );
   });
+
+  test(
+    'validates the mirror manifest after rejecting a primary download link',
+    () async {
+      final requests = <String>[];
+      final client = MockClient((request) async {
+        requests.add(request.url.host);
+        if (request.url.host == publicAssetsRoot.host) {
+          return _manifest({
+            'version': '1.0.0',
+            'url': 'https://example.test/update.apk',
+          });
+        }
+        return _manifest(_release(latest));
+      });
+      addTearDown(client.close);
+      final result = await AppUpdatesRepository(PublicDataClient(client))
+          .checkForUpdate();
+      expect(
+        result,
+        isA<AppUpdateAvailable>().having(
+          (update) => update.url,
+          'url',
+          _releaseUrl(latest),
+        ),
+      );
+      expect(requests, [publicAssetsRoot.host, publicAssetsBackupRoot.host]);
+    },
+  );
 
   test('stable sees only stable, beta chooses the highest version and accepts old manifests', () async {
     Future<AppUpdateResult> check(
@@ -486,13 +520,16 @@ void main() {
     for (final invalid in ['1.01.0', '1.0.0-rc.1', '1.0.0\n']) {
       await expectLater(
         check(_release(invalid), preview, beta),
-        throwsFormatException,
+        _manifestFailure(DiagnosticCode.invalidData),
       );
     }
-    await expectLater(check(preview, null, stable), throwsFormatException);
+    await expectLater(
+      check(preview, null, stable),
+      _manifestFailure(DiagnosticCode.invalidData),
+    );
     await expectLater(
       check(null, _release(latest), beta),
-      throwsFormatException,
+      _manifestFailure(DiagnosticCode.invalidData),
     );
     final older =
         await check(_release(latest), null, stable) as AppUpdateAvailable;
@@ -526,7 +563,7 @@ void main() {
       final over = List.filled(17000, 'x').join();
       await expectLater(
         repository(_release(latest, changelog: [over])).checkForUpdate(),
-        throwsFormatException,
+        _manifestFailure(DiagnosticCode.responseTooLarge),
       );
     },
   );
@@ -694,7 +731,10 @@ void main() {
       await _mountProfile(
         tester,
         Brightness.light,
-        MockClient((_) async {
+        MockClient((request) async {
+          if (request.url.host == publicAssetsBackupRoot.host) {
+            return http.Response('', 503);
+          }
           expect(responses.moveNext(), isTrue);
           return responses.current.$1;
         }),
@@ -719,6 +759,10 @@ void main() {
 
 String _releaseUrl(String version) =>
     'https://github.com/LTCpond/neuq-one/releases/tag/v$version';
+
+Matcher _manifestFailure(DiagnosticCode code) => throwsA(
+  isA<PublicDataException>().having((error) => error.code, 'code', code),
+);
 
 Map<String, Object> _release(
   String version, {
@@ -829,7 +873,9 @@ Future<void> _mountProfile(
         reminderSyncProvider.overrideWith(
           (ref) async => const ReminderStatus(ReminderCondition.off),
         ),
-        publicDataClientProvider.overrideWithValue(PublicDataClient(client)),
+        publicDataClientProvider.overrideWithValue(
+          PublicDataClient(client, cooldown: Duration.zero),
+        ),
       ],
       child: MaterialApp(
         theme: appTheme(brightness),

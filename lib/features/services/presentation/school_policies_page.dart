@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:pdfx/pdfx.dart';
 
+import '../../../core/time/campus_clock.dart';
 import '../../../core/widgets/campus_components.dart';
 import '../../../core/widgets/screen.dart';
 import '../data/school_policies.dart';
@@ -33,16 +34,19 @@ class SchoolPoliciesPage extends ConsumerWidget {
           DataPanel(
             value: catalog,
             retry: () => ref.invalidate(schoolPoliciesProvider),
-            builder: (policies) {
-              if (policies.isEmpty) {
-                return const StatePanel(
-                  '暂无学校政策',
-                  '政策发布后会显示在这里。',
-                  icon: Icons.description_outlined,
-                );
-              }
+            builder: (data) {
+              final policies = data.policies;
               return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  if (data.isOffline || data.updatedAt != null)
+                    _CatalogStatus(data: data),
+                  if (policies.isEmpty)
+                    const StatePanel(
+                      '暂无学校政策',
+                      '政策发布后会显示在这里。',
+                      icon: Icons.description_outlined,
+                    ),
                   for (final policy in policies)
                     Padding(
                       padding: const EdgeInsets.only(bottom: 8),
@@ -71,6 +75,25 @@ class SchoolPoliciesPage extends ConsumerWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+class _CatalogStatus extends StatelessWidget {
+  const _CatalogStatus({required this.data});
+
+  final SchoolPolicyCatalog data;
+
+  @override
+  Widget build(BuildContext context) {
+    final updatedAt = data.updatedAt;
+    final status = [
+      if (data.isOffline) '离线缓存',
+      if (updatedAt != null) '目录更新于 ${campusDateTimeLabel(updatedAt)}',
+    ].join(' · ');
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Text(status, style: Theme.of(context).textTheme.bodySmall),
     );
   }
 }

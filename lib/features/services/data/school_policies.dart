@@ -21,7 +21,7 @@ final schoolPolicyRepositoryProvider = Provider<SchoolPolicyRepository>(
   ),
 );
 
-final schoolPoliciesProvider = StreamProvider.autoDispose<List<SchoolPolicy>>(
+final schoolPoliciesProvider = StreamProvider.autoDispose<SchoolPolicyCatalog>(
   (ref) => ref.watch(schoolPolicyRepositoryProvider).loadCatalog(),
   retry: (_, _) => null,
 );
@@ -53,12 +53,32 @@ typedef SchoolPolicySaver = Future<bool> Function(
   Uint8List bytes,
 );
 
+class SchoolPolicyCatalog {
+  const SchoolPolicyCatalog(
+    this.policies, {
+    this.updatedAt,
+    this.isOffline = false,
+  });
+
+  final List<SchoolPolicy> policies;
+  final DateTime? updatedAt;
+  final bool isOffline;
+}
+
+typedef _CatalogCache = ({
+  Uint8List bytes,
+  SchoolPolicyCatalog catalog,
+  PublicDataValidators? validators,
+});
+
 class SchoolPolicyRepository {
   SchoolPolicyRepository(this._client, this._directory);
 
   static const _root = '/assets/policies';
   static const _index = 'index.json';
+  static const _catalogCache = 'index.cache';
   static const _maxIndexBytes = 128 * 1024;
+  static const _maxHeaderBytes = 8 * 1024;
   static const _maxPdfBytes = 25 * 1024 * 1024;
   static final _idPattern = RegExp(r'^[a-z0-9]+(?:-[a-z0-9]+)*$');
   static final _digestPattern = RegExp(r'^[a-f0-9]{64}$');
@@ -66,76 +86,165 @@ class SchoolPolicyRepository {
   final PublicDataClient _client;
   final Future<Directory> Function() _directory;
   final _writes = CacheWrites();
+  Future<SchoolPolicyCatalog>? _inFlightCatalog;
 
   Future<int> cacheBytes() async => cacheFileBytes(await _cacheDirectory());
 
-  Future<void> clearCache() => _writes.clear(() async {
-    await deleteCacheEntity(await _cacheDirectory());
-  });
+  Future<void> clearCache() {
+    _inFlightCatalog = null;
+    return _writes.clear(() async {
+      await deleteCacheEntity(await _cacheDirectory());
+    });
+  }
 
-  Stream<List<SchoolPolicy>> loadCatalog() async* {
+  Stream<SchoolPolicyCatalog> loadCatalog() async* {
     final version = _writes.version;
-    final cached = await _read(_index, _maxIndexBytes);
+    final cached =
+        await _readCatalog(_catalogCache) ?? await _readCatalog(_index);
     if (!_writes.current(version)) return;
-    List<SchoolPolicy>? catalog;
-    if (cached != null) {
-      try {
-        catalog = _parseCatalog(cached);
-      } on FormatException catch (error) {
-        diagnostics.record(
-          DiagnosticModule.cache,
-          DiagnosticStage.decode,
-          error: error,
-        );
-      }
-    }
+    final catalog = cached?.catalog;
     if (catalog != null) yield catalog;
 
     try {
       if (!_writes.current(version)) return;
-      final response = await _client.getBytes(
-        '$_root/$_index',
-        source: PublicDataSource.assets,
-        accept: 'application/json',
-        revalidate: true,
-        maxBytes: _maxIndexBytes,
-      );
-      final bytes = response.body;
-      if (bytes == null) throw const FormatException('缺少学校政策目录');
-      final updated = _parseCatalog(bytes);
-      if (catalog == null || !listEquals(bytes, cached)) {
-        await _writes.write(version, () => _store(_index, bytes));
-        if (_writes.current(version)) yield updated;
+      final pending = _inFlightCatalog ??= _refreshCatalog(cached, version)
+          .whenComplete(() {
+            if (_writes.current(version)) _inFlightCatalog = null;
+          });
+      final updated = await pending;
+      if (_writes.current(version) && !identical(updated, catalog)) {
+        yield updated;
       }
+    } on PublicDataException {
+      if (catalog == null) rethrow;
+      if (_writes.current(version)) {
+        yield SchoolPolicyCatalog(
+          catalog.policies,
+          updatedAt: catalog.updatedAt,
+          isOffline: true,
+        );
+      }
+    }
+  }
+
+  Future<SchoolPolicyCatalog> _refreshCatalog(
+    _CatalogCache? cached,
+    int? version,
+  ) async {
+    final response = await _client.getBytes(
+      '$_root/$_index',
+      source: PublicDataSource.assets,
+      accept: 'application/json',
+      revalidate: true,
+      validators: cached?.validators,
+      maxBytes: _maxIndexBytes,
+      decode: (bytes) => (bytes, _parseCatalog(bytes)),
+    );
+    final (bytes, policies) =
+        response.body ?? (cached!.bytes, cached.catalog.policies);
+    final catalog = cached != null && listEquals(bytes, cached.bytes)
+        ? cached.catalog
+        : SchoolPolicyCatalog(policies, updatedAt: DateTime.now().toUtc());
+    final previous = cached?.validators;
+    final validators = response.validators(previous: previous);
+    if (!identical(catalog, cached?.catalog) ||
+        validators.resource != previous?.resource ||
+        validators.etag != previous?.etag ||
+        validators.lastModified != previous?.lastModified) {
+      final metadata = {
+        'resource': validators.resource.toString(),
+        'etag': validators.etag,
+        'lastModified': validators.lastModified,
+        'updatedAt': catalog.updatedAt?.toUtc().toIso8601String(),
+      };
+      final header = utf8.encode('${jsonEncode(metadata)}\n');
+      if (header.length <= _maxHeaderBytes) {
+        await _writes.write(
+          version,
+          () =>
+              _store(_catalogCache, Uint8List.fromList([...header, ...bytes])),
+        );
+      }
+    }
+    return catalog;
+  }
+
+  Future<_CatalogCache?> _readCatalog(String filename) async {
+    final hasMetadata = filename == _catalogCache;
+    final entry = await _read(
+      filename,
+      _maxIndexBytes + (hasMetadata ? _maxHeaderBytes : 0),
+    );
+    if (entry == null) return null;
+    try {
+      final separator = hasMetadata ? entry.indexOf(0x0a) : -1;
+      if (hasMetadata && (separator < 0 || separator >= _maxHeaderBytes)) {
+        throw const FormatException('政策目录缓存头无效');
+      }
+      final header = separator < 0
+          ? const <String, dynamic>{}
+          : jsonDecode(utf8.decode(entry.sublist(0, separator)))
+                as Map<String, dynamic>;
+      final bytes = Uint8List.sublistView(entry, separator + 1);
+      if (bytes.length > _maxIndexBytes) return null;
+      final resource = Uri.tryParse(header['resource'] as String? ?? '');
+      final validators = resource != null && resource.hasAuthority
+          ? PublicDataValidators(
+              resource,
+              etag: header['etag'] as String?,
+              lastModified: header['lastModified'] as String?,
+            )
+          : null;
+      final policies = _parseCatalog(bytes);
+      final updatedAt =
+          DateTime.tryParse(header['updatedAt'] as String? ?? '') ??
+          await File.fromUri((await _cacheDirectory()).uri.resolve(filename))
+              .lastModified();
+      return (
+        bytes: bytes,
+        catalog: SchoolPolicyCatalog(policies, updatedAt: updatedAt),
+        validators: validators,
+      );
     } catch (error) {
       diagnostics.record(
-        DiagnosticModule.publicData,
-        DiagnosticStage.request,
+        DiagnosticModule.cache,
+        DiagnosticStage.decode,
         error: error,
       );
-      if (catalog == null) rethrow;
+      return null;
     }
   }
 
   Future<Uint8List> loadPdf(SchoolPolicy policy) async {
     final version = _writes.version;
     if (version == null) throw const FormatException('正在清理学校政策缓存');
-    final name = '${policy.id}.pdf';
-    final cached = await _read(name, _maxPdfBytes);
-    if (cached != null && _validPdf(cached, policy.sha256)) return cached;
+    if (!_idPattern.hasMatch(policy.id) ||
+        policy.id.length > 64 ||
+        !_digestPattern.hasMatch(policy.sha256)) {
+      throw const FormatException('学校政策文件标识无效');
+    }
+    final name = '${policy.id}-${policy.sha256}.pdf';
+    final legacyName = '${policy.id}.pdf';
+    for (final filename in [name, legacyName]) {
+      final cached = await _read(filename, _maxPdfBytes);
+      if (cached != null && _validPdf(cached, policy.sha256)) return cached;
+    }
 
     final response = await _client.getBytes(
-      '$_root/$name',
+      '$_root/$legacyName',
       source: PublicDataSource.assets,
       accept: 'application/pdf',
       revalidate: true,
       maxBytes: _maxPdfBytes,
       timeout: const Duration(seconds: 30),
+      decode: (bytes) {
+        if (!_validPdf(bytes, policy.sha256)) {
+          throw const FormatException('学校政策文件校验失败');
+        }
+        return bytes;
+      },
     );
-    final bytes = response.body;
-    if (bytes == null || !_validPdf(bytes, policy.sha256)) {
-      throw const FormatException('学校政策文件校验失败');
-    }
+    final bytes = response.body!;
     await _writes.write(version, () => _store(name, bytes));
     return bytes;
   }

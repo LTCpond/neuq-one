@@ -38,7 +38,10 @@ void main() {
   ) {
     final client = MockClient(respond);
     addTearDown(client.close);
-    return CampusMapRepository(PublicDataClient(client), () async => directory);
+    return CampusMapRepository(
+      PublicDataClient(client, cooldown: Duration.zero),
+      () async => directory,
+    );
   }
 
   test(
@@ -100,7 +103,7 @@ void main() {
       expect(await disk.cacheBytes(), 0);
       expect(await disk.readCached(), isNull);
       expect(await personal.readAsString(), 'synthetic export');
-      expect((await disk.load().single).etag, '"second"');
+      expect((await disk.load().single).validators?.etag, '"second"');
     },
   );
 
@@ -109,7 +112,10 @@ void main() {
     () async {
       var online = false;
       final disk = repository((request) async {
-        expect(request.url.origin, publicAssetsRoot.origin);
+        expect(
+          request.url.origin,
+          anyOf(publicAssetsRoot.origin, publicAssetsBackupRoot.origin),
+        );
         expect(request.headers['if-none-match'], isNull);
         expect(request.headers['if-modified-since'], isNull);
         if (!online) throw const SocketException('offline');
@@ -124,13 +130,13 @@ void main() {
         ),
         ..._firstMap,
       ]);
-      expect((await disk.load().single).bytes, _firstMap);
+      expect((await disk.load().last).bytes, _firstMap);
       online = true;
       expect(await disk.load().map((map) => map.bytes).toList(), [
         _firstMap,
         _updatedMap,
       ]);
-      expect((await disk.readCached())!.etag, '"new"');
+      expect((await disk.readCached())!.validators?.etag, '"new"');
     },
   );
 
@@ -153,14 +159,14 @@ void main() {
         await expectLater(disk.refresh(initial), throwsA(isA<Exception>()));
         final stored = (await disk.readCached())!;
         expect(stored.bytes, _firstMap);
-        expect(stored.etag, '"first"');
+        expect(stored.validators?.etag, '"first"');
       }
       body = _updatedMap;
       etag = '"new"';
       await disk.refresh(initial);
       final stored = (await disk.readCached())!;
       expect(stored.bytes, _updatedMap);
-      expect(stored.etag, '"new"');
+      expect(stored.validators?.etag, '"new"');
       expect(await directory.list().length, 1);
     },
   );
@@ -185,13 +191,13 @@ void main() {
       ]);
 
       online = false;
-      expect((await disk.load().single).bytes, _legacyMap);
+      expect((await disk.load().last).bytes, _legacyMap);
       online = true;
       expect(await disk.load().map((map) => map.bytes).toList(), [
         _legacyMap,
         _firstMap,
       ]);
-      expect((await disk.readCached())!.etag, '"png"');
+      expect((await disk.readCached())!.validators?.etag, '"png"');
     },
   );
 
@@ -201,6 +207,10 @@ void main() {
     final pending = Completer<http.Response>();
     final requested = Completer<void>();
     final offline = repository((request) {
+      if (request.url.host == publicAssetsBackupRoot.host) {
+        expect(request.headers['if-none-match'], isNull);
+        return Future.value(http.Response('', 503));
+      }
       expect(request.headers['if-none-match'], '"first"');
       requested.complete();
       return pending.future;
@@ -215,10 +225,40 @@ void main() {
     expect(pending.isCompleted, isFalse);
     final refresh = offline.refresh(cached);
     pending.completeError(const SocketException('offline'));
-    await expectLater(refresh, throwsA(isA<SocketException>()));
-    expect(state.read().requireValue, same(cached));
+    await expectLater(refresh, throwsA(isA<PublicDataException>()));
+    await container.pump();
+    final offlineMap = state.read().requireValue;
+    expect(offlineMap.bytes, cached.bytes);
+    expect(offlineMap.updatedAt, cached.updatedAt);
+    expect(offlineMap.isOffline, isTrue);
     expect((await offline.readCached())!.bytes, _firstMap);
   });
+
+  test(
+    'validates the PNG on each source before committing its validators',
+    () async {
+      final requests = <http.Request>[];
+      var revalidate = false;
+      final disk = repository((request) async {
+        requests.add(request);
+        if (request.url.host == publicAssetsRoot.host) {
+          return _ok(Uint8List.fromList(utf8.encode('<html>')), '"invalid"');
+        }
+        return revalidate ? http.Response('', 304) : _ok(_firstMap, '"mirror"');
+      });
+      final map = await disk.refresh(null);
+      expect(map.bytes, _firstMap);
+      expect(
+        map.validators?.resource,
+        publicAssetsBackupRoot.resolve('/assets/maps/campus-map.png'),
+      );
+      final stored = (await disk.readCached())!;
+      revalidate = true;
+      expect(await disk.refresh(stored), same(stored));
+      expect(requests[2].headers['if-none-match'], isNull);
+      expect(requests[3].headers['if-none-match'], '"mirror"');
+    },
+  );
 
   test(
     'discards an unreadable cache and requests the complete resource',

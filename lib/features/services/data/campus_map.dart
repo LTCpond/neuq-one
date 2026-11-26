@@ -23,11 +23,17 @@ final campusMapProvider = StreamProvider.autoDispose<CampusMap>(
 );
 
 class CampusMap {
-  const CampusMap(this.bytes, {this.etag, this.lastModified});
+  const CampusMap(
+    this.bytes, {
+    this.validators,
+    this.updatedAt,
+    this.isOffline = false,
+  });
 
   final Uint8List bytes;
-  final String? etag;
-  final String? lastModified;
+  final PublicDataValidators? validators;
+  final DateTime? updatedAt;
+  final bool isOffline;
 }
 
 class CampusMapRepository {
@@ -76,13 +82,16 @@ class CampusMapRepository {
       if (_writes.current(version) && !identical(updated, cached)) {
         yield updated;
       }
-    } catch (error) {
-      diagnostics.record(
-        DiagnosticModule.publicData,
-        DiagnosticStage.request,
-        error: error,
-      );
+    } on PublicDataException {
       if (cached == null) rethrow;
+      if (_writes.current(version)) {
+        yield CampusMap(
+          cached.bytes,
+          validators: cached.validators,
+          updatedAt: cached.updatedAt,
+          isOffline: true,
+        );
+      }
     }
   }
 
@@ -101,12 +110,24 @@ class CampusMapRepository {
       final isPng = _isPng(bytes);
       if (!isPng && !_isLegacyWebP(bytes)) return null;
       await _validateImage(bytes);
-      final sameResource =
-          isPng && header['origin'] == _client.assetsOrigin.origin;
+      final legacyOrigin = Uri.tryParse(header['origin'] as String? ?? '');
+      final resource = header['resource'] is String
+          ? Uri.tryParse(header['resource'] as String)
+          : legacyOrigin != null && legacyOrigin.hasAuthority
+          ? legacyOrigin.resolve(_path)
+          : null;
       return CampusMap(
         bytes,
-        etag: sameResource ? header['etag'] as String? : null,
-        lastModified: sameResource ? header['lastModified'] as String? : null,
+        validators: isPng && resource != null
+            ? PublicDataValidators(
+                resource,
+                etag: header['etag'] as String?,
+                lastModified: header['lastModified'] as String?,
+              )
+            : null,
+        updatedAt:
+            DateTime.tryParse(header['updatedAt'] as String? ?? '') ??
+            await file.lastModified(),
       );
     } catch (error) {
       diagnostics.record(
@@ -131,24 +152,32 @@ class CampusMapRepository {
       _path,
       source: PublicDataSource.assets,
       accept: 'image/png',
-      etag: cached?.etag,
-      lastModified: cached?.lastModified,
+      validators: cached?.validators,
       revalidate: true,
       timeout: const Duration(seconds: 30),
       maxBytes: _maxBytes,
+      decode: (bytes) async {
+        if (!_isPng(bytes)) throw const FormatException('校园地图不是有效的 PNG 文件');
+        try {
+          await _validateImage(bytes);
+        } on Exception {
+          throw const FormatException('校园地图无法解码');
+        }
+        return bytes;
+      },
     );
-    final bytes = response.body;
-    if (bytes == null) {
-      return cached ?? (throw const FormatException('校园地图缓存缺失'));
+    final validators = response.validators(previous: cached?.validators);
+    if (response.notModified &&
+        cached!.validators?.etag == validators.etag &&
+        cached.validators?.lastModified == validators.lastModified) {
+      return cached;
     }
-    if (!_isPng(bytes)) {
-      throw const FormatException('校园地图不是有效的 PNG 文件');
-    }
-    await _validateImage(bytes);
     final map = CampusMap(
-      bytes,
-      etag: response.headers['etag'],
-      lastModified: response.headers['last-modified'],
+      response.body ?? cached!.bytes,
+      validators: validators,
+      updatedAt: response.notModified
+          ? cached!.updatedAt
+          : DateTime.now().toUtc(),
     );
     try {
       await _writes.write(version, () => _write(map));
@@ -164,9 +193,10 @@ class CampusMapRepository {
 
   Future<void> _write(CampusMap map) async {
     final header = {
-      'origin': _client.assetsOrigin.origin,
-      'etag': map.etag,
-      'lastModified': map.lastModified,
+      'resource': map.validators?.resource.toString(),
+      'etag': map.validators?.etag,
+      'lastModified': map.validators?.lastModified,
+      'updatedAt': map.updatedAt?.toUtc().toIso8601String(),
     };
     final metadata = utf8.encode('${jsonEncode(header)}\n');
     if (metadata.length > _maxHeaderBytes) return;

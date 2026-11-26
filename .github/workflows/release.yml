@@ -46,6 +46,10 @@ jobs:
           APKSIGNER: ${{ steps.verify-android.outputs.apksigner }}
           AAPT2: ${{ steps.verify-android.outputs.aapt2 }}
           UPDATE_CHANNEL: ${{ steps.release-config.outputs.channel }}
+          NEUQ_ONE_DATA_ORIGIN: ${{ vars.NEUQ_ONE_DATA_ORIGIN || 'https://blue-flower-0e0c87f00.4.azurestaticapps.net' }}
+          NEUQ_ONE_DATA_BACKUP_ORIGIN: ${{ vars.NEUQ_ONE_DATA_BACKUP_ORIGIN || 'https://neuq-one-data.pages.dev' }}
+          NEUQ_ONE_ASSETS_ORIGIN: ${{ vars.NEUQ_ONE_ASSETS_ORIGIN || 'https://agreeable-wave-005580b00.4.azurestaticapps.net' }}
+          NEUQ_ONE_ASSETS_BACKUP_ORIGIN: ${{ vars.NEUQ_ONE_ASSETS_BACKUP_ORIGIN || 'https://neuq-one-assets.pages.dev' }}
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
@@ -88,6 +92,10 @@ jobs:
 
           flutter build apk --release --split-per-abi --no-pub \
             --dart-define="NEUQ_ONE_UPDATE_CHANNEL=$UPDATE_CHANNEL" \
+            --dart-define="NEUQ_ONE_DATA_ORIGIN=$NEUQ_ONE_DATA_ORIGIN" \
+            --dart-define="NEUQ_ONE_DATA_BACKUP_ORIGIN=$NEUQ_ONE_DATA_BACKUP_ORIGIN" \
+            --dart-define="NEUQ_ONE_ASSETS_ORIGIN=$NEUQ_ONE_ASSETS_ORIGIN" \
+            --dart-define="NEUQ_ONE_ASSETS_BACKUP_ORIGIN=$NEUQ_ONE_ASSETS_BACKUP_ORIGIN" \
             --dart-define="NEUQ_ONE_REPOSITORY_URL=https://github.com/$GITHUB_REPOSITORY"
 
           mkdir -p release-apks

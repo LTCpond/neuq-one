@@ -40,6 +40,17 @@ class $ClassroomCacheEntriesTable extends ClassroomCacheEntries
     type: DriftSqlType.dateTime,
     requiredDuringInsert: true,
   );
+  static const VerificationMeta _resourceMeta = const VerificationMeta(
+    'resource',
+  );
+  @override
+  late final GeneratedColumn<String> resource = GeneratedColumn<String>(
+    'resource',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
   static const VerificationMeta _etagMeta = const VerificationMeta('etag');
   @override
   late final GeneratedColumn<String> etag = GeneratedColumn<String>(
@@ -87,6 +98,7 @@ class $ClassroomCacheEntriesTable extends ClassroomCacheEntries
     id,
     payload,
     checkedAt,
+    resource,
     etag,
     lastModified,
     cacheControl,
@@ -122,6 +134,12 @@ class $ClassroomCacheEntriesTable extends ClassroomCacheEntries
       );
     } else if (isInserting) {
       context.missing(_checkedAtMeta);
+    }
+    if (data.containsKey('resource')) {
+      context.handle(
+        _resourceMeta,
+        resource.isAcceptableOrUnknown(data['resource']!, _resourceMeta),
+      );
     }
     if (data.containsKey('etag')) {
       context.handle(
@@ -174,6 +192,10 @@ class $ClassroomCacheEntriesTable extends ClassroomCacheEntries
         DriftSqlType.dateTime,
         data['${effectivePrefix}checked_at'],
       )!,
+      resource: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}resource'],
+      ),
       etag: attachedDatabase.typeMapping.read(
         DriftSqlType.string,
         data['${effectivePrefix}etag'],
@@ -204,6 +226,7 @@ class ClassroomCacheEntry extends DataClass
   final int id;
   final String payload;
   final DateTime checkedAt;
+  final String? resource;
   final String? etag;
   final String? lastModified;
   final String? cacheControl;
@@ -212,6 +235,7 @@ class ClassroomCacheEntry extends DataClass
     required this.id,
     required this.payload,
     required this.checkedAt,
+    this.resource,
     this.etag,
     this.lastModified,
     this.cacheControl,
@@ -223,6 +247,9 @@ class ClassroomCacheEntry extends DataClass
     map['id'] = Variable<int>(id);
     map['payload'] = Variable<String>(payload);
     map['checked_at'] = Variable<DateTime>(checkedAt);
+    if (!nullToAbsent || resource != null) {
+      map['resource'] = Variable<String>(resource);
+    }
     if (!nullToAbsent || etag != null) {
       map['etag'] = Variable<String>(etag);
     }
@@ -243,6 +270,9 @@ class ClassroomCacheEntry extends DataClass
       id: Value(id),
       payload: Value(payload),
       checkedAt: Value(checkedAt),
+      resource: resource == null && nullToAbsent
+          ? const Value.absent()
+          : Value(resource),
       etag: etag == null && nullToAbsent ? const Value.absent() : Value(etag),
       lastModified: lastModified == null && nullToAbsent
           ? const Value.absent()
@@ -265,6 +295,7 @@ class ClassroomCacheEntry extends DataClass
       id: serializer.fromJson<int>(json['id']),
       payload: serializer.fromJson<String>(json['payload']),
       checkedAt: serializer.fromJson<DateTime>(json['checkedAt']),
+      resource: serializer.fromJson<String?>(json['resource']),
       etag: serializer.fromJson<String?>(json['etag']),
       lastModified: serializer.fromJson<String?>(json['lastModified']),
       cacheControl: serializer.fromJson<String?>(json['cacheControl']),
@@ -278,6 +309,7 @@ class ClassroomCacheEntry extends DataClass
       'id': serializer.toJson<int>(id),
       'payload': serializer.toJson<String>(payload),
       'checkedAt': serializer.toJson<DateTime>(checkedAt),
+      'resource': serializer.toJson<String?>(resource),
       'etag': serializer.toJson<String?>(etag),
       'lastModified': serializer.toJson<String?>(lastModified),
       'cacheControl': serializer.toJson<String?>(cacheControl),
@@ -289,6 +321,7 @@ class ClassroomCacheEntry extends DataClass
     int? id,
     String? payload,
     DateTime? checkedAt,
+    Value<String?> resource = const Value.absent(),
     Value<String?> etag = const Value.absent(),
     Value<String?> lastModified = const Value.absent(),
     Value<String?> cacheControl = const Value.absent(),
@@ -297,6 +330,7 @@ class ClassroomCacheEntry extends DataClass
     id: id ?? this.id,
     payload: payload ?? this.payload,
     checkedAt: checkedAt ?? this.checkedAt,
+    resource: resource.present ? resource.value : this.resource,
     etag: etag.present ? etag.value : this.etag,
     lastModified: lastModified.present ? lastModified.value : this.lastModified,
     cacheControl: cacheControl.present ? cacheControl.value : this.cacheControl,
@@ -307,6 +341,7 @@ class ClassroomCacheEntry extends DataClass
       id: data.id.present ? data.id.value : this.id,
       payload: data.payload.present ? data.payload.value : this.payload,
       checkedAt: data.checkedAt.present ? data.checkedAt.value : this.checkedAt,
+      resource: data.resource.present ? data.resource.value : this.resource,
       etag: data.etag.present ? data.etag.value : this.etag,
       lastModified: data.lastModified.present
           ? data.lastModified.value
@@ -326,6 +361,7 @@ class ClassroomCacheEntry extends DataClass
           ..write('id: $id, ')
           ..write('payload: $payload, ')
           ..write('checkedAt: $checkedAt, ')
+          ..write('resource: $resource, ')
           ..write('etag: $etag, ')
           ..write('lastModified: $lastModified, ')
           ..write('cacheControl: $cacheControl, ')
@@ -339,6 +375,7 @@ class ClassroomCacheEntry extends DataClass
     id,
     payload,
     checkedAt,
+    resource,
     etag,
     lastModified,
     cacheControl,
@@ -351,6 +388,7 @@ class ClassroomCacheEntry extends DataClass
           other.id == this.id &&
           other.payload == this.payload &&
           other.checkedAt == this.checkedAt &&
+          other.resource == this.resource &&
           other.etag == this.etag &&
           other.lastModified == this.lastModified &&
           other.cacheControl == this.cacheControl &&
@@ -362,6 +400,7 @@ class ClassroomCacheEntriesCompanion
   final Value<int> id;
   final Value<String> payload;
   final Value<DateTime> checkedAt;
+  final Value<String?> resource;
   final Value<String?> etag;
   final Value<String?> lastModified;
   final Value<String?> cacheControl;
@@ -370,6 +409,7 @@ class ClassroomCacheEntriesCompanion
     this.id = const Value.absent(),
     this.payload = const Value.absent(),
     this.checkedAt = const Value.absent(),
+    this.resource = const Value.absent(),
     this.etag = const Value.absent(),
     this.lastModified = const Value.absent(),
     this.cacheControl = const Value.absent(),
@@ -379,6 +419,7 @@ class ClassroomCacheEntriesCompanion
     this.id = const Value.absent(),
     required String payload,
     required DateTime checkedAt,
+    this.resource = const Value.absent(),
     this.etag = const Value.absent(),
     this.lastModified = const Value.absent(),
     this.cacheControl = const Value.absent(),
@@ -389,6 +430,7 @@ class ClassroomCacheEntriesCompanion
     Expression<int>? id,
     Expression<String>? payload,
     Expression<DateTime>? checkedAt,
+    Expression<String>? resource,
     Expression<String>? etag,
     Expression<String>? lastModified,
     Expression<String>? cacheControl,
@@ -398,6 +440,7 @@ class ClassroomCacheEntriesCompanion
       if (id != null) 'id': id,
       if (payload != null) 'payload': payload,
       if (checkedAt != null) 'checked_at': checkedAt,
+      if (resource != null) 'resource': resource,
       if (etag != null) 'etag': etag,
       if (lastModified != null) 'last_modified': lastModified,
       if (cacheControl != null) 'cache_control': cacheControl,
@@ -409,6 +452,7 @@ class ClassroomCacheEntriesCompanion
     Value<int>? id,
     Value<String>? payload,
     Value<DateTime>? checkedAt,
+    Value<String?>? resource,
     Value<String?>? etag,
     Value<String?>? lastModified,
     Value<String?>? cacheControl,
@@ -418,6 +462,7 @@ class ClassroomCacheEntriesCompanion
       id: id ?? this.id,
       payload: payload ?? this.payload,
       checkedAt: checkedAt ?? this.checkedAt,
+      resource: resource ?? this.resource,
       etag: etag ?? this.etag,
       lastModified: lastModified ?? this.lastModified,
       cacheControl: cacheControl ?? this.cacheControl,
@@ -436,6 +481,9 @@ class ClassroomCacheEntriesCompanion
     }
     if (checkedAt.present) {
       map['checked_at'] = Variable<DateTime>(checkedAt.value);
+    }
+    if (resource.present) {
+      map['resource'] = Variable<String>(resource.value);
     }
     if (etag.present) {
       map['etag'] = Variable<String>(etag.value);
@@ -458,6 +506,7 @@ class ClassroomCacheEntriesCompanion
           ..write('id: $id, ')
           ..write('payload: $payload, ')
           ..write('checkedAt: $checkedAt, ')
+          ..write('resource: $resource, ')
           ..write('etag: $etag, ')
           ..write('lastModified: $lastModified, ')
           ..write('cacheControl: $cacheControl, ')
@@ -484,6 +533,7 @@ typedef $$ClassroomCacheEntriesTableCreateCompanionBuilder =
       Value<int> id,
       required String payload,
       required DateTime checkedAt,
+      Value<String?> resource,
       Value<String?> etag,
       Value<String?> lastModified,
       Value<String?> cacheControl,
@@ -494,6 +544,7 @@ typedef $$ClassroomCacheEntriesTableUpdateCompanionBuilder =
       Value<int> id,
       Value<String> payload,
       Value<DateTime> checkedAt,
+      Value<String?> resource,
       Value<String?> etag,
       Value<String?> lastModified,
       Value<String?> cacheControl,
@@ -521,6 +572,11 @@ class $$ClassroomCacheEntriesTableFilterComposer
 
   ColumnFilters<DateTime> get checkedAt => $composableBuilder(
     column: $table.checkedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get resource => $composableBuilder(
+    column: $table.resource,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -569,6 +625,11 @@ class $$ClassroomCacheEntriesTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
+  ColumnOrderings<String> get resource => $composableBuilder(
+    column: $table.resource,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   ColumnOrderings<String> get etag => $composableBuilder(
     column: $table.etag,
     builder: (column) => ColumnOrderings(column),
@@ -607,6 +668,9 @@ class $$ClassroomCacheEntriesTableAnnotationComposer
 
   GeneratedColumn<DateTime> get checkedAt =>
       $composableBuilder(column: $table.checkedAt, builder: (column) => column);
+
+  GeneratedColumn<String> get resource =>
+      $composableBuilder(column: $table.resource, builder: (column) => column);
 
   GeneratedColumn<String> get etag =>
       $composableBuilder(column: $table.etag, builder: (column) => column);
@@ -676,6 +740,7 @@ class $$ClassroomCacheEntriesTableTableManager
                 Value<int> id = const Value.absent(),
                 Value<String> payload = const Value.absent(),
                 Value<DateTime> checkedAt = const Value.absent(),
+                Value<String?> resource = const Value.absent(),
                 Value<String?> etag = const Value.absent(),
                 Value<String?> lastModified = const Value.absent(),
                 Value<String?> cacheControl = const Value.absent(),
@@ -684,6 +749,7 @@ class $$ClassroomCacheEntriesTableTableManager
                 id: id,
                 payload: payload,
                 checkedAt: checkedAt,
+                resource: resource,
                 etag: etag,
                 lastModified: lastModified,
                 cacheControl: cacheControl,
@@ -694,6 +760,7 @@ class $$ClassroomCacheEntriesTableTableManager
                 Value<int> id = const Value.absent(),
                 required String payload,
                 required DateTime checkedAt,
+                Value<String?> resource = const Value.absent(),
                 Value<String?> etag = const Value.absent(),
                 Value<String?> lastModified = const Value.absent(),
                 Value<String?> cacheControl = const Value.absent(),
@@ -702,6 +769,7 @@ class $$ClassroomCacheEntriesTableTableManager
                 id: id,
                 payload: payload,
                 checkedAt: checkedAt,
+                resource: resource,
                 etag: etag,
                 lastModified: lastModified,
                 cacheControl: cacheControl,

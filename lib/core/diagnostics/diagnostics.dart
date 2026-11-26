@@ -7,6 +7,8 @@ import 'package:http/http.dart' as http;
 
 enum DiagnosticSeverity { debug, info, warn, error }
 
+enum DiagnosticEndpoint { dataPrimary, dataBackup, assetsPrimary, assetsBackup }
+
 enum DiagnosticModule {
   schoolAuth,
   academics,
@@ -60,6 +62,18 @@ enum DiagnosticCode {
   promptAlreadyShown,
   promptDeferred,
   promptShown,
+  dnsFailure,
+  connectionFailed,
+  connectionTimeout,
+  responseTimeout,
+  readIdleTimeout,
+  downloadDeadline,
+  rateLimited,
+  serverError,
+  responseTooLarge,
+  sourceCoolingDown,
+  sourceProbe,
+  sourceSwitch,
 }
 
 typedef DiagnosticEntry = ({
@@ -69,12 +83,14 @@ typedef DiagnosticEntry = ({
   DiagnosticStage stage,
   DiagnosticCode code,
   String? exceptionType,
+  DiagnosticEndpoint? endpoint,
+  int? elapsedMs,
+  int? httpStatus,
 });
 
 final diagnostics = Diagnostics();
 
-/// Stores only enumerated context and the exception type. Messages, stack
-/// traces, request details and arbitrary metadata never enter the buffer.
+/// Stores enumerated context, exception types, and numeric request metrics.
 class Diagnostics {
   static const capacity = 150;
   final _entries = Queue<DiagnosticEntry>();
@@ -87,6 +103,9 @@ class Diagnostics {
     DiagnosticSeverity level = DiagnosticSeverity.warn,
     DiagnosticCode? code,
     Object? error,
+    DiagnosticEndpoint? endpoint,
+    int? elapsedMs,
+    int? httpStatus,
   }) {
     if (_entries.length == capacity) _entries.removeFirst();
     _entries.add((
@@ -96,6 +115,9 @@ class Diagnostics {
       stage: stage,
       code: code ?? _classify(error),
       exceptionType: error?.runtimeType.toString(),
+      endpoint: endpoint,
+      elapsedMs: elapsedMs,
+      httpStatus: httpStatus,
     ));
   }
 
