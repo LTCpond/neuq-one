@@ -2,6 +2,8 @@ import 'package:material_ui/material_ui.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../network/campus_access/campus_resource.dart';
+
 final preferencesProvider = Provider((ref) => SharedPreferencesAsync());
 
 class AppSettings {
@@ -51,5 +53,56 @@ class SettingsController extends AsyncNotifier<AppSettings> {
     await write();
     ref.invalidateSelf();
     await future;
+  }
+}
+
+class CampusAccessSettings {
+  const CampusAccessSettings({
+    this.preference = CampusAccessPreference.automatic,
+    this.idleMinutes = CampusAccessLimits.idleMinutes,
+  });
+
+  final CampusAccessPreference preference;
+  final int idleMinutes;
+}
+
+final campusAccessSettingsProvider =
+    AsyncNotifierProvider<CampusAccessSettingsController, CampusAccessSettings>(
+      CampusAccessSettingsController.new,
+      retry: (_, _) => null,
+    );
+
+class CampusAccessSettingsController
+    extends AsyncNotifier<CampusAccessSettings> {
+  static const _preferenceKey = 'campusAccessPreference';
+  static const _idleKey = 'webVpnIdleMinutes';
+
+  @override
+  Future<CampusAccessSettings> build() async {
+    final prefs = ref.watch(preferencesProvider);
+    final preference = await prefs.getString(_preferenceKey);
+    final idle = await prefs.getInt(_idleKey);
+    return CampusAccessSettings(
+      preference: CampusAccessPreference.values.firstWhere(
+        (value) => value.name == preference,
+        orElse: () => CampusAccessPreference.automatic,
+      ),
+      idleMinutes: CampusAccessLimits.idleChoices.contains(idle)
+          ? idle!
+          : CampusAccessLimits.idleMinutes,
+    );
+  }
+
+  Future<void> setPreference(CampusAccessPreference value) async {
+    await ref.read(preferencesProvider).setString(_preferenceKey, value.name);
+    if (ref.mounted) ref.invalidateSelf();
+  }
+
+  Future<void> setIdleMinutes(int value) async {
+    if (!CampusAccessLimits.idleChoices.contains(value)) {
+      throw ArgumentError.value(value);
+    }
+    await ref.read(preferencesProvider).setInt(_idleKey, value);
+    if (ref.mounted) ref.invalidateSelf();
   }
 }

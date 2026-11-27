@@ -1,6 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
+import 'package:neuq_one/core/network/campus_access/campus_resource.dart';
 import 'package:neuq_one/core/storage/settings.dart';
 import 'package:neuq_one/features/services/data/classroom_view_preferences.dart';
 import 'package:neuq_one/features/services/domain/classrooms.dart';
@@ -56,6 +57,37 @@ void main() {
       table: true,
     ));
   });
+
+  test(
+    'campus access preferences persist alongside existing settings',
+    () async {
+      final preferences = _ExistingPreferences();
+      final original = Map.of(preferences.values);
+      final overrides = [preferencesProvider.overrideWithValue(preferences)];
+      final first = ProviderContainer.test(overrides: overrides);
+      final initial = await first.read(campusAccessSettingsProvider.future);
+      expect(initial.preference, CampusAccessPreference.automatic);
+      expect(initial.idleMinutes, 5);
+      final controller = first.read(campusAccessSettingsProvider.notifier);
+      await controller.setPreference(CampusAccessPreference.preferVpn);
+      await controller.setIdleMinutes(15);
+      expect(preferences.values, {
+        ...original,
+        'campusAccessPreference': 'preferVpn',
+        'webVpnIdleMinutes': 15,
+      });
+      final second = ProviderContainer.test(overrides: overrides);
+      final saved = await second.read(campusAccessSettingsProvider.future);
+      expect(saved.preference, CampusAccessPreference.preferVpn);
+      expect(saved.idleMinutes, 15);
+      preferences.values['webVpnIdleMinutes'] = -1;
+      second.invalidate(campusAccessSettingsProvider);
+      expect(
+        (await second.read(campusAccessSettingsProvider.future)).idleMinutes,
+        5,
+      );
+    },
+  );
 }
 
 class _ExistingPreferences implements SharedPreferencesAsync {
@@ -82,6 +114,11 @@ class _ExistingPreferences implements SharedPreferencesAsync {
 
   @override
   Future<void> setString(String key, String value) async {
+    values[key] = value;
+  }
+
+  @override
+  Future<void> setInt(String key, int value) async {
     values[key] = value;
   }
 
