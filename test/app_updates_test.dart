@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart'
+    show debugDefaultTargetPlatformOverride;
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -69,6 +71,58 @@ void main() {
       );
     }
   });
+
+  testWidgets(
+    'Android Debug shows DEV and checks published versions only on demand',
+    (tester) async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.android;
+      addTearDown(() => debugDefaultTargetPlatformOverride = null);
+      messenger.setMockMethodCallHandler(
+        channel,
+        (_) async => '$installed-dev',
+      );
+      final prefs = _UpdatePreferences();
+      prefs.values['appUpdates.state.v1'] = jsonEncode({
+        'channel': 'beta',
+        'lastSuccess': DateTime.now().millisecondsSinceEpoch,
+        'available': _release(latest),
+      });
+      var requests = 0;
+      final scope = await _mountApp(
+        tester,
+        MockClient((_) async {
+          requests++;
+          return _manifest(_release(latest));
+        }),
+        prefs,
+        useActualBuildMode: true,
+      );
+      expect(scope.read(androidDebugBuildProvider), isTrue);
+      expect(requests, 0);
+      expect(scope.read(appUpdateCoordinatorProvider).available, isNull);
+      scope.read(routerProvider).go('/profile');
+      await tester.pumpAndSettle();
+
+      final about = find.text('关于 NEUQ One');
+      await tester.ensureVisible(about);
+      await tester.pumpAndSettle();
+      expect(find.text('DEV'), findsOneWidget);
+      expect(find.text('当前版本 v$installed-dev'), findsOneWidget);
+      await tester.tap(about);
+      await tester.pumpAndSettle();
+      expect(find.text('关于 NEUQ One · DEV'), findsOneWidget);
+      await tester.tap(find.text('关闭'));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('检查更新'));
+      await tester.pumpAndSettle();
+      expect(requests, 1);
+      expect(find.text('发布渠道最新版本 v$latest。开发版需重新构建。'), findsOneWidget);
+      expect(find.text('前往下载'), findsNothing);
+      expect(find.text('v$latest 可用'), findsNothing);
+      expect(scope.read(appUpdateCoordinatorProvider).available, isNull);
+    },
+  );
 
   test('automatic checks persist success and back off errors; manual bypasses both', () async {
     final prefs = _UpdatePreferences();
@@ -794,12 +848,15 @@ Future<ProviderContainer> _mountApp(
   _UpdateAuth? auth,
   DateTime Function()? clock,
   AppDatabase? database,
+  bool useActualBuildMode = false,
 }) async {
   addTearDown(client.close);
   final db = database ?? AppDatabase(NativeDatabase.memory());
   if (database == null) addTearDown(db.close);
   final scope = ProviderContainer.test(
     overrides: [
+      if (!useActualBuildMode)
+        androidDebugBuildProvider.overrideWithValue(false),
       settingsProvider.overrideWith(_TestSettings.new),
       preferencesProvider.overrideWithValue(prefs),
       schoolAuthRepositoryProvider.overrideWithValue(auth ?? _UpdateAuth()),
@@ -870,6 +927,7 @@ Future<void> _mountProfile(
   await tester.pumpWidget(
     ProviderScope(
       overrides: [
+        androidDebugBuildProvider.overrideWithValue(false),
         settingsProvider.overrideWith(_TestSettings.new),
         preferencesProvider.overrideWithValue(_UpdatePreferences()),
         schoolConnectionProvider.overrideWith(

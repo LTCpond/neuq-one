@@ -93,6 +93,7 @@ class _NeuqOneAppState extends ConsumerState<NeuqOneApp> {
         _restoringSession ||
         _updateStarted ||
         kIsWeb ||
+        ref.read(androidDebugBuildProvider) ||
         (defaultTargetPlatform != TargetPlatform.android &&
             defaultTargetPlatform != TargetPlatform.iOS)) {
       return;
@@ -126,12 +127,13 @@ class _NeuqOneAppState extends ConsumerState<NeuqOneApp> {
       );
     }
     final settings = ref.watch(settingsProvider).value;
-    if (!_restoringSession && !_updateStarted) {
+    final developmentBuild = ref.watch(androidDebugBuildProvider);
+    if (!developmentBuild && !_restoringSession && !_updateStarted) {
       WidgetsBinding.instance.addPostFrameCallback((_) => _startUpdateCheck());
     }
     ref.listen(reminderSyncProvider, (_, _) {});
     return MaterialApp.router(
-      title: 'NEUQ One',
+      title: developmentBuild ? 'NEUQ One Dev' : 'NEUQ One',
       debugShowCheckedModeBanner: false,
       locale: const Locale('zh', 'CN'),
       supportedLocales: const [Locale('zh', 'CN')],

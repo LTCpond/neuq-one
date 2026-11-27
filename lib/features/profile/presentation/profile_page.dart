@@ -102,6 +102,7 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
     final reminders = ref.watch(reminderSyncProvider);
     final installedVersion = ref.watch(installedAppVersionProvider);
     final availableUpdate = ref.watch(availableAppUpdateProvider).value;
+    final developmentBuild = ref.watch(androidDebugBuildProvider);
     final colors = Theme.of(context).colorScheme;
     final dark = colors.brightness == Brightness.dark;
     return Scaffold(
@@ -254,6 +255,7 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
                   icon: const Icon(Icons.info_outline),
                   title: '关于 NEUQ One',
                   subtitle: '免费开源 · 非官方',
+                  trailingLabel: developmentBuild ? 'DEV' : null,
                   accent: dark
                       ? (const Color(0xFF25495A), const Color(0xFFAEE5FA))
                       : (const Color(0xFFDDF0F8), const Color(0xFF267795)),
@@ -299,7 +301,11 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
     context: context,
     builder: (context) => AlertDialog(
       scrollable: true,
-      title: const Text('关于 NEUQ One'),
+      title: Text(
+        ref.read(androidDebugBuildProvider)
+            ? '关于 NEUQ One · DEV'
+            : '关于 NEUQ One',
+      ),
       content: const Text(
         'NEUQ One 是面向东北大学秦皇岛分校学生的非官方开源校园工作台，学校的正式通知、成绩及业务办理均以官方系统为准。\n\n'
         '如果您在使用过程中遇到问题，或有任何意见与建议，欢迎在 GitHub 提交 Issue，也欢迎通过 Pull Request（PR）参与开发，共同完善 NEUQ One。',

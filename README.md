@@ -52,6 +52,8 @@ flutter build apk --debug
 
 输出：`build/app/outputs/flutter-apk/app-debug.apk`。GitHub Actions 也会在检查通过后生成 `neuq-one-debug` 构建产物，可从仓库的 [Actions](https://github.com/LTCpond/neuq-one/actions) 下载。
 
+Android 上，`flutter run` 和 `flutter build apk --debug` 生成 **NEUQ One Dev**（`org.neuqone.neuq_one.debug`），版本名带 `-dev`。开发版和正式版可同时安装，各自使用独立应用数据。开发版的手动检查更新仅显示发布渠道版本。
+
 本地 Release 构建需要正式签名配置。推送与 `pubspec.yaml` 版本匹配的 `vMAJOR.MINOR.PATCH` 标签后，GitHub Actions 会构建并验证三个 ABI 的 APK。标签指向的提交通过 `.github/release-channel` 指定发布渠道，当前为 `beta`。`stable` 构建只接收正式版本，`beta` 构建可以接收更高的公测或正式版本。两个渠道都会触发版本清单刷新。[Android 签名配置](docs/android-signing.md) · [部署与 App 发布](docs/deployment.md)
 
 个人中心的 GitHub 入口默认指向本仓库。派生项目可以覆盖：

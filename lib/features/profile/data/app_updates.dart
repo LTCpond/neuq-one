@@ -20,8 +20,16 @@ const _buildChannel = _channelName == 'beta'
     ? AppUpdateChannel.beta
     : AppUpdateChannel.stable;
 
+final androidDebugBuildProvider = Provider<bool>(
+  (_) =>
+      kDebugMode && !kIsWeb && defaultTargetPlatform == TargetPlatform.android,
+);
+
 final appUpdatesProvider = Provider<AppUpdatesRepository>(
-  (ref) => AppUpdatesRepository(ref.watch(publicDataClientProvider)),
+  (ref) => AppUpdatesRepository(
+    ref.watch(publicDataClientProvider),
+    developmentBuild: ref.watch(androidDebugBuildProvider),
+  ),
 );
 
 final installedAppVersionProvider = FutureProvider.autoDispose<String>(
@@ -149,7 +157,7 @@ class AppUpdateCoordinator {
         await _saveState(cachedRelease: json['available']);
       }
       final saved = json['available'];
-      if (saved == null) return;
+      if (saved == null || _repository.developmentBuild) return;
       final installed = await _repository.installedVersion();
       final offer = _AppRelease.read(saved);
       if ((_repository.channel == AppUpdateChannel.stable &&
@@ -173,6 +181,7 @@ class AppUpdateCoordinator {
       _startup ??= check(automatic: true);
 
   Future<AppUpdateResult?> check({required bool automatic}) {
+    if (automatic && _repository.developmentBuild) return Future.value();
     _updateLog(
       DiagnosticStage.check,
       code: automatic
@@ -392,6 +401,13 @@ class AppUpToDate extends AppUpdateResult {
   const AppUpToDate();
 }
 
+class PublishedAppVersion extends AppUpdateResult {
+  const PublishedAppVersion(this.version, {required this.prerelease});
+
+  final String version;
+  final bool prerelease;
+}
+
 class AppUpdateAvailable extends AppUpdateResult {
   const AppUpdateAvailable._(this.currentVersion, this._release);
 
@@ -489,18 +505,27 @@ int _compareVersions(String first, String second) {
 }
 
 class AppUpdatesRepository {
-  const AppUpdatesRepository(this._client, {this.channel = _buildChannel});
+  const AppUpdatesRepository(
+    this._client, {
+    this.channel = _buildChannel,
+    this.developmentBuild = false,
+  });
 
   static const _channel = MethodChannel('org.neuqone.neuq_one/app_version');
   static const maxManifestBytes = 16 * 1024;
   final PublicDataClient _client;
   final AppUpdateChannel channel;
+  final bool developmentBuild;
 
   Future<String> installedVersion() async {
-    final version = _validVersion(
-      await _channel.invokeMethod<String>('getVersion'),
-    );
+    final version = await _channel.invokeMethod<String>('getVersion');
     if (version == null) throw const FormatException('无法识别当前 App 版本');
+    final baseVersion = developmentBuild && version.endsWith('-dev')
+        ? version.substring(0, version.length - '-dev'.length)
+        : version;
+    if (_validVersion(baseVersion) == null) {
+      throw const FormatException('无法识别当前 App 版本');
+    }
     return version;
   }
 
@@ -527,6 +552,9 @@ class AppUpdatesRepository {
         level: DiagnosticSeverity.info,
       );
       return const NoPublishedAppRelease();
+    }
+    if (developmentBuild) {
+      return PublishedAppVersion(latest.version, prerelease: latest.prerelease);
     }
     final installed = await installedVersion();
     final newer = _compareVersions(latest.version, installed) > 0;

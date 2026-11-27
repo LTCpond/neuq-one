@@ -213,6 +213,11 @@ Future<void> checkAndPresentAppUpdate(
         showMessage(context, '暂无可用更新');
       case AppUpToDate():
         showMessage(context, '当前已是最新版本');
+      case PublishedAppVersion(:final version, :final prerelease):
+        showMessage(
+          context,
+          '发布渠道最新版本 v$version${prerelease ? '（公测版）' : ''}。开发版需重新构建。',
+        );
       case AppUpdateAvailable():
         Future<void>? persisted;
         try {

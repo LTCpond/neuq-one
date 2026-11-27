@@ -18,7 +18,9 @@ flutter pub get --enforce-lockfile
 flutter build apk --release --split-per-abi --no-pub
 ```
 
-输出目录为 `build/app/outputs/flutter-apk/`。Release 签名配置缺失或不完整时，Gradle 会终止构建。Debug 构建使用 Android 默认调试签名。已安装的调试包与正式包签名不同，切换前请按需备份本地数据。
+输出目录为 `build/app/outputs/flutter-apk/`。Release 签名配置缺失或不完整时，Gradle 会终止构建。正式版包名为 `org.neuqone.neuq_one`。Debug 构建使用 Android 默认调试签名，包名为 `org.neuqone.neuq_one.debug`，可与正式版同时安装。此前以正式包名安装的旧调试包仍受 Android 的签名匹配规则约束。
+
+覆盖已安装的 GitHub 正式版时，使用同一 ABI 的正式包。Flutter 的分 ABI 包使用带 ABI 偏移的版本码，通用 APK 的版本码按 `pubspec.yaml` 中的构建号生成。
 
 手动分发前，对每个 APK 运行 `apksigner verify --print-certs <APK路径>`，并核对证书 SHA-256 指纹与正式 Keystore 中的证书一致。[Android apksigner 文档](https://developer.android.com/tools/apksigner)
 
