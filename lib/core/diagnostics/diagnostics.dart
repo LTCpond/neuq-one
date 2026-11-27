@@ -5,6 +5,8 @@ import 'dart:io';
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 
+import '../network/campus_access/campus_resource.dart';
+
 enum DiagnosticSeverity { debug, info, warn, error }
 
 enum DiagnosticEndpoint { dataPrimary, dataBackup, assetsPrimary, assetsBackup }
@@ -17,6 +19,8 @@ enum DiagnosticModule {
   updates,
   cache,
   campusCard,
+  campusAccess,
+  webVpn,
 }
 
 enum DiagnosticStage {
@@ -81,6 +85,11 @@ enum DiagnosticCode {
   sourceCoolingDown,
   sourceProbe,
   sourceSwitch,
+  vpnExpired,
+  verificationRequired,
+  unsafeEndpoint,
+  unsupportedProtocol,
+  idleRelease,
 }
 
 typedef DiagnosticEntry = ({
@@ -93,6 +102,8 @@ typedef DiagnosticEntry = ({
   DiagnosticEndpoint? endpoint,
   int? elapsedMs,
   int? httpStatus,
+  CampusResourceId? resource,
+  CampusAccessRoute? route,
 });
 
 final diagnostics = Diagnostics();
@@ -113,6 +124,8 @@ class Diagnostics {
     DiagnosticEndpoint? endpoint,
     int? elapsedMs,
     int? httpStatus,
+    CampusResourceId? resource,
+    CampusAccessRoute? route,
   }) {
     if (_entries.length == capacity) _entries.removeFirst();
     _entries.add((
@@ -125,6 +138,8 @@ class Diagnostics {
       endpoint: endpoint,
       elapsedMs: elapsedMs,
       httpStatus: httpStatus,
+      resource: resource,
+      route: route,
     ));
   }
 

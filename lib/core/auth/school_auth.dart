@@ -239,6 +239,15 @@ final _schoolLoginStoreProvider = Provider(
   (ref) => _SchoolLoginStore(ref.watch(schoolTicketStorageProvider)),
 );
 
+final schoolRememberedCredentialsProvider =
+    Provider<Future<NeuqCredentials?> Function(String)>((ref) {
+      final store = ref.watch(_schoolLoginStoreProvider);
+      return (subject) =>
+          !kIsWeb && defaultTargetPlatform == TargetPlatform.android
+          ? store.credentialsFor(subject)
+          : Future.value();
+    });
+
 final neuqHttpClientFactoryProvider = Provider<http.Client Function()>(
   (_) => http.Client.new,
 );
@@ -265,10 +274,7 @@ class SchoolSessionStatusController extends Notifier<SchoolSessionStatus> {
 final Provider<NeuqClient> neuqClientProvider = Provider((ref) {
   final store = ref.watch(_schoolLoginStoreProvider);
   final client = NeuqClient(
-    readRemembered: (subject) =>
-        !kIsWeb && defaultTargetPlatform == TargetPlatform.android
-        ? store.credentialsFor(subject)
-        : Future.value(),
+    readRemembered: ref.watch(schoolRememberedCredentialsProvider),
     forgetRemembered: (subject) async {
       await store.forget(subject);
       if (ref.mounted) ref.invalidate(rememberedSchoolPasswordProvider);
@@ -297,6 +303,25 @@ final schoolSessionProvider =
       SchoolSessionController.new,
       retry: (_, _) => null,
     );
+
+final schoolNetworkBoundaryProvider =
+    NotifierProvider<
+      SchoolNetworkBoundary,
+      ({bool signingOut, bool deletingPassword})
+    >(SchoolNetworkBoundary.new);
+
+class SchoolNetworkBoundary
+    extends Notifier<({bool signingOut, bool deletingPassword})> {
+  @override
+  ({bool signingOut, bool deletingPassword}) build() =>
+      (signingOut: false, deletingPassword: false);
+
+  void signingOut(bool value) =>
+      state = (signingOut: value, deletingPassword: state.deletingPassword);
+
+  void deletingPassword(bool value) =>
+      state = (signingOut: state.signingOut, deletingPassword: value);
+}
 
 class SchoolSessionController extends AsyncNotifier<SchoolSession?> {
   int _revision = 0;
@@ -377,11 +402,33 @@ class SchoolSessionController extends AsyncNotifier<SchoolSession?> {
     if (_disconnecting) return;
     _disconnecting = true;
     _revision++;
+    final boundary = ref.read(schoolNetworkBoundaryProvider.notifier);
+    boundary.signingOut(true);
     try {
       await ref.read(schoolAuthRepositoryProvider).disconnect();
     } finally {
-      if (ref.mounted) state = const AsyncData(null);
+      if (ref.mounted) {
+        state = const AsyncData(null);
+        boundary.signingOut(false);
+      }
       _disconnecting = false;
+    }
+  }
+
+  Future<bool> forgetPassword() async {
+    final subject = state.asData?.value?.subject;
+    if (subject == null ||
+        _disconnecting ||
+        ref.read(schoolNetworkBoundaryProvider).deletingPassword) {
+      return false;
+    }
+    final boundary = ref.read(schoolNetworkBoundaryProvider.notifier);
+    boundary.deletingPassword(true);
+    try {
+      await ref.read(schoolAuthRepositoryProvider).forgetPassword(subject);
+      return true;
+    } finally {
+      if (ref.mounted) boundary.deletingPassword(false);
     }
   }
 }
