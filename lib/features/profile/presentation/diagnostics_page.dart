@@ -17,6 +17,8 @@ class _DiagnosticsPageState extends State<DiagnosticsPage> {
     entry.level.name.toUpperCase(),
     '${entry.module.name}.${entry.stage.name}.${entry.code.name}',
     ?entry.endpoint?.name,
+    ?entry.resource?.name,
+    ?entry.route?.name,
     if (entry.elapsedMs case final ms?) '${ms}ms',
     if (entry.httpStatus case final status?) 'HTTP $status',
     ?entry.exceptionType,

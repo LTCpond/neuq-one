@@ -1,5 +1,7 @@
 import 'package:material_ui/material_ui.dart';
 
+import '../../../core/network/campus_access/campus_resource.dart';
+
 class CampusService {
   const CampusService.website(this.name, this.icon, String target)
     : url = target,
@@ -64,7 +66,7 @@ const accessServices = [
 ];
 
 const webVpnService = CampusService.website(
-  'WebVPN',
+  '校外远程资源访问系统',
   Icons.vpn_lock_outlined,
-  'https://vpn.neuq.edu.cn/',
+  officialWebVpnUrl,
 );
