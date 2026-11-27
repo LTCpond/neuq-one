@@ -1,10 +1,10 @@
-import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:material_ui/material_ui.dart';
 
 import '../../../app/school_reconnect_button.dart';
 import '../../../core/auth/school_auth.dart';
 import '../../../core/database/school_data.dart';
+import '../../../core/widgets/campus_components.dart';
 import '../../../core/widgets/school_sync_status.dart';
 import '../../../core/widgets/screen.dart';
 import '../domain/plan_completion.dart';
@@ -16,18 +16,10 @@ import 'plan_completion/plan_filter_bar.dart';
 import 'plan_completion/plan_progress_card.dart';
 import 'plan_completion/plan_substitute_index.dart';
 
-class PlanCompletionPage extends ConsumerStatefulWidget {
-  const PlanCompletionPage({super.key});
-
-  @override
-  ConsumerState<PlanCompletionPage> createState() => _PlanCompletionPageState();
-}
-
-class _PlanCompletionPageState extends ConsumerState<PlanCompletionPage> {
-  final _expanded = <String>{};
-  var _filter = PlanCourseFilter.all;
-
-  Future<void> _refresh() async {
+/// Shared refresh action so the app bar button and pull-to-refresh behave the
+/// same way and never issue overlapping school requests.
+final planCompletionRefreshProvider = Provider<Future<void> Function()>((ref) {
+  return () async {
     if (ref.read(schoolDataSourceProvider) == null) return;
     final key = schoolRefreshProvider(SchoolDataSet.planCompletion);
     if (ref.read(key).isLoading) return;
@@ -40,7 +32,22 @@ class _PlanCompletionPageState extends ConsumerState<PlanCompletionPage> {
     } catch (_) {
       // SchoolSyncStatus reports the failure while cached data stays visible.
     }
-  }
+  };
+});
+
+/// Plan audit content embedded in the academic center. It intentionally has no
+/// app bar so the academic center keeps a single, stable page header.
+class PlanCompletionSection extends ConsumerStatefulWidget {
+  const PlanCompletionSection({super.key});
+
+  @override
+  ConsumerState<PlanCompletionSection> createState() =>
+      _PlanCompletionSectionState();
+}
+
+class _PlanCompletionSectionState extends ConsumerState<PlanCompletionSection> {
+  final _expanded = <String>{};
+  var _filter = PlanCourseFilter.all;
 
   void _toggle(PlanCategoryNode node) {
     setState(() {
@@ -86,9 +93,7 @@ class _PlanCompletionPageState extends ConsumerState<PlanCompletionPage> {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final colors = theme.colorScheme;
-    final dark = theme.brightness == Brightness.dark;
+    final colors = Theme.of(context).colorScheme;
     final refreshKey = schoolRefreshProvider(SchoolDataSet.planCompletion);
     final refresh = ref.watch(refreshKey);
     final cache = ref.watch(schoolPlanCompletionCacheProvider);
@@ -98,6 +103,7 @@ class _PlanCompletionPageState extends ConsumerState<PlanCompletionPage> {
         (connection) => connection.value == SchoolConnection.restoring,
       ),
     );
+    final reload = ref.watch(planCompletionRefreshProvider);
     final report = cache.value?.data;
     final tree = report == null ? null : PlanCompletionTree.fromReport(report);
     final substituteIndex = ref.watch(planSubstituteIndexProvider);
@@ -105,90 +111,38 @@ class _PlanCompletionPageState extends ConsumerState<PlanCompletionPage> {
     final hasContent = tree != null && tree.roots.isNotEmpty;
     final loading =
         available && report == null && (cache.isLoading || refresh.isLoading);
-    final titleSize = 22.0;
-    final scaledTitle = MediaQuery.textScalerOf(context).scale(titleSize);
-    final toolbarHeight =
-        56.0 + (scaledTitle - titleSize).clamp(0.0, 16.0).toDouble();
 
-    return Scaffold(
-      appBar: AppBar(
-        toolbarHeight: toolbarHeight,
-        title: Text(
-          '培养方案',
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: TextStyle(
-            color: colors.onSurface,
-            fontSize: titleSize,
-            fontWeight: FontWeight.w600,
-            height: 1.2,
+    return Stack(
+      children: [
+        RefreshIndicator(
+          color: colors.primary,
+          backgroundColor: colors.surface,
+          onRefresh: reload,
+          child: CustomScrollView(
+            key: const PageStorageKey('plan-completion-scroll'),
+            physics: const AlwaysScrollableScrollPhysics(),
+            slivers: _slivers(
+              refresh: refresh,
+              cache: cache,
+              report: report,
+              tree: tree,
+              available: available,
+              restoring: restoring,
+              hasContent: hasContent,
+              loading: loading,
+              statusOf: statusOf,
+              reload: reload,
+            ),
           ),
         ),
-        actions: [
-          if (available)
-            Padding(
-              padding: const EdgeInsets.only(right: 6),
-              child: IconButton(
-                tooltip: refresh.isLoading ? '正在刷新' : '刷新培养方案',
-                onPressed: refresh.isLoading ? null : _refresh,
-                icon: refresh.isLoading
-                    ? SizedBox.square(
-                        dimension: 18,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          color: colors.primary,
-                        ),
-                      )
-                    : Icon(
-                        Icons.refresh_rounded,
-                        size: 22,
-                        color: colors.primary,
-                      ),
-                style: IconButton.styleFrom(
-                  foregroundColor: colors.primary,
-                  disabledForegroundColor: colors.primary.withValues(
-                    alpha: .55,
-                  ),
-                  visualDensity: VisualDensity.standard,
-                ),
-              ),
-            ),
-        ],
-        systemOverlayStyle: dark
-            ? SystemUiOverlayStyle.light
-            : SystemUiOverlayStyle.dark,
-      ),
-      body: Stack(
-        children: [
-          RefreshIndicator(
-            color: colors.primary,
-            backgroundColor: colors.surface,
-            onRefresh: _refresh,
-            child: CustomScrollView(
-              key: const PageStorageKey('plan-completion-scroll'),
-              physics: const AlwaysScrollableScrollPhysics(),
-              slivers: _slivers(
-                refresh: refresh,
-                cache: cache,
-                report: report,
-                tree: tree,
-                available: available,
-                restoring: restoring,
-                hasContent: hasContent,
-                loading: loading,
-                statusOf: statusOf,
-              ),
-            ),
+        if (report != null && refresh.isLoading)
+          const Positioned(
+            top: 0,
+            left: 0,
+            right: 0,
+            child: LinearProgressIndicator(minHeight: 2),
           ),
-          if (report != null && refresh.isLoading)
-            const Positioned(
-              top: 0,
-              left: 0,
-              right: 0,
-              child: LinearProgressIndicator(minHeight: 2),
-            ),
-        ],
-      ),
+      ],
     );
   }
 
@@ -202,6 +156,7 @@ class _PlanCompletionPageState extends ConsumerState<PlanCompletionPage> {
     required bool hasContent,
     required bool loading,
     required PlanCourseStatusResolver statusOf,
+    required Future<void> Function() reload,
   }) {
     if (report != null) {
       if (!hasContent || tree == null) {
@@ -211,7 +166,7 @@ class _PlanCompletionPageState extends ConsumerState<PlanCompletionPage> {
             '教务暂未返回课程类别，请稍后刷新重试。',
             icon: Icons.school_outlined,
             action: available
-                ? OutlinedButton(onPressed: _refresh, child: const Text('刷新'))
+                ? OutlinedButton(onPressed: reload, child: const Text('刷新'))
                 : null,
           ),
         ];
@@ -221,10 +176,6 @@ class _PlanCompletionPageState extends ConsumerState<PlanCompletionPage> {
           padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
           sliver: SliverList.list(
             children: [
-              PlanProgressCard(report: report),
-              const SizedBox(height: 10),
-              const PlanInfoNote(),
-              const SizedBox(height: 4),
               SchoolSyncStatus(
                 available: available,
                 refresh: refresh,
@@ -232,8 +183,13 @@ class _PlanCompletionPageState extends ConsumerState<PlanCompletionPage> {
                 cacheError: cache.hasError,
                 restoring: restoring,
                 label: '培养方案同步',
+                compactSuccessLabel: '培养方案 · 已同步',
                 reconnect: const SchoolReconnectButton(),
               ),
+              const SizedBox(height: 10),
+              PlanProgressCard(report: report),
+              const SizedBox(height: 10),
+              const PlanInfoNote(),
               const SizedBox(height: 22),
               _PlanSectionHeading(
                 '课程类别',
@@ -274,7 +230,7 @@ class _PlanCompletionPageState extends ConsumerState<PlanCompletionPage> {
         '未能读取培养方案',
         '请检查教务连接后重试，本地缓存会保留。',
         icon: Icons.cloud_off_outlined,
-        action: OutlinedButton(onPressed: _refresh, child: const Text('重试')),
+        action: OutlinedButton(onPressed: reload, child: const Text('重试')),
       ),
     ];
   }
@@ -298,6 +254,30 @@ class _PlanCompletionPageState extends ConsumerState<PlanCompletionPage> {
       ),
     ),
   );
+}
+
+/// Refresh action for the academic center app bar.
+class PlanCompletionActions extends ConsumerWidget {
+  const PlanCompletionActions({super.key});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final refreshKey = schoolRefreshProvider(SchoolDataSet.planCompletion);
+    final refresh = ref.watch(refreshKey);
+    final available = ref.watch(schoolDataSourceProvider) != null;
+    final reload = ref.watch(planCompletionRefreshProvider);
+    return CampusRefreshButton(
+      tooltip: '刷新培养方案',
+      isLoading: available && refresh.isLoading,
+      onPressed: () {
+        if (!available) {
+          showMessage(context, '培养方案查询待校方开通');
+          return;
+        }
+        reload();
+      },
+    );
+  }
 }
 
 class _PlanSectionHeading extends StatelessWidget {

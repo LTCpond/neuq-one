@@ -1,6 +1,5 @@
-import 'package:material_ui/material_ui.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:go_router/go_router.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:uuid/uuid.dart';
 
 import '../../../app/school_reconnect_button.dart';
@@ -8,7 +7,6 @@ import '../../../core/auth/school_auth.dart';
 import '../../../core/database/school_data.dart';
 import '../../../core/storage/settings.dart';
 import '../../../core/theme/app_theme.dart';
-import '../../../core/time/campus_clock.dart';
 import '../../../core/widgets/campus_components.dart';
 import '../../../core/widgets/editor.dart';
 import '../../../core/widgets/screen.dart';
@@ -19,22 +17,20 @@ import '../../timetable/presentation/semester_menu.dart';
 import '../../timetable/presentation/timetable_editors.dart';
 import '../data/local_grades.dart';
 import '../domain/grades.dart';
+import 'grades_view.dart';
 import 'semester_gpa_chart.dart';
 
-class GradesPage extends ConsumerStatefulWidget {
-  const GradesPage({super.key});
+/// Grades content embedded in the academic center. It owns the school refresh
+/// status, semester scope and local grade editing, but no page chrome.
+class GradesSection extends ConsumerWidget {
+  const GradesSection({super.key});
 
   @override
-  ConsumerState<GradesPage> createState() => _GradesPageState();
-}
-
-class _GradesPageState extends ConsumerState<GradesPage> {
-  String? _semesterId;
-  bool _allSemesters = false;
-
-  @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final terms = ref.watch(timetableProvider);
+    final semesters = ref.watch(gradeSemestersProvider);
+    final selection = ref.watch(gradesSemesterSelectionProvider);
+    final term = selectedGradeSemester(semesters, selection);
     final refreshKey = schoolRefreshProvider(SchoolDataSet.grades);
     final refresh = ref.watch(refreshKey);
     final sourceReady = ref.watch(schoolDataSourceProvider) != null;
@@ -46,12 +42,6 @@ class _GradesPageState extends ConsumerState<GradesPage> {
     final cache = ref.watch(schoolGradesCacheProvider);
     final gradeBook = cache.value?.data;
     final grades = ref.watch(gradesProvider);
-    final semesters = [...?gradeBook?.semesters, ...?terms.value?.semesters]
-      ..sort((a, b) => b.start.compareTo(a.start));
-    final term = _allSemesters
-        ? null
-        : semesters.where((entry) => entry.id == _semesterId).firstOrNull ??
-              currentSemester(semesters, campusNow());
     final fromSchool = term != null && isSchoolRecord(term.id);
     final repository = ref.watch(gradesRepositoryProvider);
     final admissionYear = ref
@@ -62,189 +52,170 @@ class _GradesPageState extends ConsumerState<GradesPage> {
     final scale = GpaScale.forAdmission(
       admissionYear ?? ref.watch(settingsProvider).value?.admissionYear ?? 2025,
     );
-    return Scaffold(
-      appBar: AppBar(
-        automaticallyImplyLeading: false,
-        toolbarHeight:
-            72 + (MediaQuery.textScalerOf(context).scale(30) - 30).clamp(0, 36),
-        actionsPadding: const EdgeInsets.only(right: 12),
-        title: const FittedBox(
-          alignment: Alignment.centerLeft,
-          fit: BoxFit.scaleDown,
-          child: CampusPageTitle('成绩中心', eyebrow: 'NEUQ · ACADEMIC'),
-        ),
-        actions: [
-          if (semesters.isNotEmpty) ...[
-            SemesterMenu(
-              semesters: semesters,
-              selected: term,
-              onChanged: (id) => setState(() {
-                _semesterId = id;
-                _allSemesters = false;
-              }),
-              onSelectAll: () => setState(() => _allSemesters = true),
-            ),
-            const SizedBox(width: 6),
-          ],
-          CampusRefreshButton(
-            tooltip: '刷新教务成绩',
-            isLoading: sourceReady && refresh.isLoading,
-            onPressed: () {
-              if (!sourceReady) {
-                showMessage(context, '教务成绩查询待校方开通');
-                return;
-              }
-              ref.invalidate(refreshKey);
-            },
-          ),
-        ],
+    return ListView(
+      padding: EdgeInsets.fromLTRB(
+        16,
+        6,
+        16,
+        term != null && !fromSchool ? 92 : 18,
       ),
-      floatingActionButton: term == null || fromSchool
-          ? null
-          : FloatingActionButton.extended(
-              onPressed: () => _editGrade(context, repository, term),
-              icon: const Icon(Icons.add),
-              label: const Text('录入成绩'),
-            ),
-      body: ListView(
-        padding: EdgeInsets.fromLTRB(
-          16,
-          6,
-          16,
-          term != null && !fromSchool ? 92 : 18,
+      children: [
+        SchoolSyncStatus(
+          available: sourceReady,
+          refresh: refresh,
+          syncedAt: cache.value?.syncedAt,
+          label: '教务成绩刷新',
+          restoring: restoring,
+          cacheError: cache.hasError,
+          compactSuccessLabel: '教务成绩 · 已同步',
+          reconnect: const SchoolReconnectButton(),
         ),
-        children: [
-          SchoolSyncStatus(
-            available: sourceReady,
-            refresh: refresh,
-            syncedAt: cache.value?.syncedAt,
-            label: '教务成绩刷新',
-            restoring: restoring,
-            cacheError: cache.hasError,
-            compactSuccessLabel: '教务成绩 · 已同步',
-            reconnect: const SchoolReconnectButton(),
-          ),
-          const SizedBox(height: 10),
-          Card(
-            child: ListTile(
-              leading: CampusIconBadge(
-                background: Theme.of(context).colorScheme.primaryContainer,
-                foreground: Theme.of(context).colorScheme.onPrimaryContainer,
-                child: const Icon(Icons.checklist_rounded),
-              ),
-              title: const Text('培养方案完成情况'),
-              trailing: const Icon(Icons.chevron_right_rounded),
-              onTap: () => context.push<void>('/grades/plan-completion'),
-            ),
-          ),
-          const SizedBox(height: 10),
-          DataPanel(
-            value: terms,
-            retry: () => ref.invalidate(timetableProvider),
-            builder: (_) => semesters.isEmpty
-                ? StatePanel(
-                    '先创建一个学期',
-                    '课表和成绩共享学期设置。',
-                    icon: Icons.school_outlined,
-                    action: FilledButton(
-                      onPressed: () => editSemester(
-                        context,
-                        ref.read(timetableRepositoryProvider),
-                      ),
-                      child: const Text('新增学期'),
+        const SizedBox(height: 10),
+        DataPanel(
+          value: terms,
+          retry: () => ref.invalidate(timetableProvider),
+          builder: (_) => semesters.isEmpty
+              ? StatePanel(
+                  '先创建一个学期',
+                  '课表和成绩共享学期设置。',
+                  icon: Icons.school_outlined,
+                  action: FilledButton(
+                    onPressed: () => editSemester(
+                      context,
+                      ref.read(timetableRepositoryProvider),
                     ),
-                  )
-                : DataPanel(
-                    value: grades,
-                    retry: () => ref.invalidate(gradesProvider),
-                    builder: (localGrades) {
-                      final rows = [...?gradeBook?.grades, ...localGrades]
-                          .where(
-                            (grade) =>
-                                !grade.demo &&
-                                (term == null || grade.semesterId == term.id),
-                          )
-                          .toList();
-                      final gradesBySemester = <String, List<Grade>>{};
-                      for (final grade in rows) {
-                        (gradesBySemester[grade.semesterId] ??= []).add(grade);
-                      }
-                      final visibleSemesters = term == null
-                          ? semesters
-                          : [term];
-                      return Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          const CampusSectionHeading('学业概览'),
-                          const SizedBox(height: 7),
-                          _SummaryCard(
-                            summary: GradeSummary(rows, scale),
-                            scale: scale,
-                            fromSchool: fromSchool,
-                            allSemesters: _allSemesters,
-                            semesterGpa: gradeBook?.semesterGpa[term?.id],
-                            cumulativeGpa: gradeBook?.cumulativeGpa,
-                            semesterGpaTrend: [
-                              if (_allSemesters)
-                                for (final semester in semesters.reversed)
-                                  (
-                                    semester: semester,
-                                    gpa:
-                                        gradeBook?.semesterGpa[semester.id] ??
-                                        GradeSummary(
-                                          gradesBySemester[semester.id] ??
-                                              const [],
-                                          scale,
-                                        ).gpa,
-                                  ),
-                            ],
-                          ),
-                          const SizedBox(height: 18),
-                          const CampusSectionHeading('课程成绩'),
-                          const SizedBox(height: 8),
-                          if (rows.isEmpty)
-                            StatePanel(
-                              _allSemesters ? '暂无成绩' : '此学期暂无成绩',
-                              switch ((_allSemesters, fromSchool)) {
-                                (true, _) => '可同步教务成绩，或选择本地学期录入成绩。',
-                                (_, true) => '当前教务快照无此学期成绩。',
-                                _ => '录入成绩后可查看平均分、学分和绩点。',
-                              },
-                              icon: Icons.insights_outlined,
-                            ),
-                          for (final semester in visibleSemesters)
-                            if (gradesBySemester[semester.id]
-                                case final grades?) ...[
-                              if (_allSemesters)
-                                Padding(
-                                  padding: const EdgeInsets.only(
-                                    top: 4,
-                                    bottom: 8,
-                                  ),
-                                  child: CampusSectionHeading(semester.name),
-                                ),
-                              for (final grade in grades)
-                                Padding(
-                                  padding: const EdgeInsets.only(bottom: 8),
-                                  child: _GradeTile(
-                                    grade: grade,
-                                    onTap: () => _detail(
-                                      context,
-                                      grade,
-                                      semester,
-                                      scale,
-                                      repository,
-                                    ),
-                                  ),
-                                ),
-                            ],
-                        ],
-                      );
-                    },
+                    child: const Text('新增学期'),
                   ),
+                )
+              : DataPanel(
+                  value: grades,
+                  retry: () => ref.invalidate(gradesProvider),
+                  builder: (localGrades) {
+                    final rows = [...?gradeBook?.grades, ...localGrades]
+                        .where(
+                          (grade) =>
+                              !grade.demo &&
+                              (term == null || grade.semesterId == term.id),
+                        )
+                        .toList();
+                    final gradesBySemester = <String, List<Grade>>{};
+                    for (final grade in rows) {
+                      (gradesBySemester[grade.semesterId] ??= []).add(grade);
+                    }
+                    final visibleSemesters = term == null ? semesters : [term];
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        const CampusSectionHeading('学业概览'),
+                        const SizedBox(height: 7),
+                        _SummaryCard(
+                          summary: GradeSummary(rows, scale),
+                          scale: scale,
+                          fromSchool: fromSchool,
+                          allSemesters: selection.allSemesters,
+                          semesterGpa: gradeBook?.semesterGpa[term?.id],
+                          cumulativeGpa: gradeBook?.cumulativeGpa,
+                          semesterGpaTrend: [
+                            if (selection.allSemesters)
+                              for (final semester in semesters.reversed)
+                                (
+                                  semester: semester,
+                                  gpa:
+                                      gradeBook?.semesterGpa[semester.id] ??
+                                      GradeSummary(
+                                        gradesBySemester[semester.id] ??
+                                            const [],
+                                        scale,
+                                      ).gpa,
+                                ),
+                          ],
+                        ),
+                        const SizedBox(height: 18),
+                        const CampusSectionHeading('课程成绩'),
+                        const SizedBox(height: 8),
+                        if (rows.isEmpty)
+                          StatePanel(
+                            selection.allSemesters ? '暂无成绩' : '此学期暂无成绩',
+                            switch ((selection.allSemesters, fromSchool)) {
+                              (true, _) => '可同步教务成绩，或选择本地学期录入成绩。',
+                              (_, true) => '当前教务快照无此学期成绩。',
+                              _ => '录入成绩后可查看平均分、学分和绩点。',
+                            },
+                            icon: Icons.insights_outlined,
+                          ),
+                        for (final semester in visibleSemesters)
+                          if (gradesBySemester[semester.id]
+                              case final grades?) ...[
+                            if (selection.allSemesters)
+                              Padding(
+                                padding: const EdgeInsets.only(
+                                  top: 4,
+                                  bottom: 8,
+                                ),
+                                child: CampusSectionHeading(semester.name),
+                              ),
+                            for (final grade in grades)
+                              Padding(
+                                padding: const EdgeInsets.only(bottom: 8),
+                                child: _GradeTile(
+                                  grade: grade,
+                                  onTap: () => _detail(
+                                    context,
+                                    grade,
+                                    semester,
+                                    scale,
+                                    repository,
+                                  ),
+                                ),
+                              ),
+                          ],
+                      ],
+                    );
+                  },
+                ),
+        ),
+      ],
+    );
+  }
+}
+
+/// Semester scope and school refresh live in the academic center app bar.
+class GradesActions extends ConsumerWidget {
+  const GradesActions({super.key});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final semesters = ref.watch(gradeSemestersProvider);
+    final selection = ref.watch(gradesSemesterSelectionProvider);
+    final term = selectedGradeSemester(semesters, selection);
+    final controller = ref.read(gradesSemesterSelectionProvider.notifier);
+    final refreshKey = schoolRefreshProvider(SchoolDataSet.grades);
+    final refresh = ref.watch(refreshKey);
+    final sourceReady = ref.watch(schoolDataSourceProvider) != null;
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        if (semesters.isNotEmpty) ...[
+          SemesterMenu(
+            semesters: semesters,
+            selected: term,
+            onChanged: controller.selectSemester,
+            onSelectAll: controller.selectAll,
           ),
+          const SizedBox(width: 6),
         ],
-      ),
+        CampusRefreshButton(
+          tooltip: '刷新教务成绩',
+          isLoading: sourceReady && refresh.isLoading,
+          onPressed: () {
+            if (!sourceReady) {
+              showMessage(context, '教务成绩查询待校方开通');
+              return;
+            }
+            ref.invalidate(refreshKey);
+          },
+        ),
+      ],
     );
   }
 }
@@ -711,7 +682,7 @@ Future<void> _detail(
   );
   if (!context.mounted) return;
   if (action == 'edit') {
-    await _editGrade(context, repository, term, grade);
+    await showGradeEditor(context, repository, term, grade);
   } else if (action == 'delete' &&
       await confirmAction(context, '删除成绩？', '移除「${grade.name}」的本地成绩记录。')) {
     try {
@@ -722,7 +693,7 @@ Future<void> _detail(
   }
 }
 
-Future<void> _editGrade(
+Future<void> showGradeEditor(
   BuildContext context,
   GradesRepository repository,
   Semester semester, [

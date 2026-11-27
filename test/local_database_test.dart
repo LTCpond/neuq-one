@@ -3,6 +3,8 @@ import 'dart:io';
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:neuq_one/core/database/app_database.dart';
+import 'package:neuq_one/features/exams/data/local_exams.dart';
+import 'package:neuq_one/features/exams/domain/exam.dart';
 import 'package:neuq_one/features/grades/data/local_grades.dart';
 import 'package:neuq_one/features/grades/domain/grades.dart';
 import 'package:neuq_one/features/timetable/data/local_timetable.dart';
@@ -77,6 +79,58 @@ void main() {
     ]);
     expect(outcomes.where((success) => success), hasLength(1));
     expect((await timetable.watch().first).courses, hasLength(1));
+  });
+
+  test('local exams persist start and end times across a reopen', () async {
+    final directory = await Directory.systemTemp.createTemp(
+      'neuq_one_exam_test_',
+    );
+    addTearDown(() => directory.delete(recursive: true));
+    final file = File('${directory.path}/exams.sqlite');
+    final exam = Exam(
+      id: 'e',
+      name: '高等数学',
+      at: DateTime.utc(2026, 11, 27, 1),
+      endsAt: DateTime.utc(2026, 11, 27, 3),
+      room: '工学馆 101',
+    );
+
+    final initial = AppDatabase(NativeDatabase(file));
+    await LocalExamRepository(initial).save(exam);
+    await initial.close();
+
+    final reopened = AppDatabase(NativeDatabase(file));
+    addTearDown(reopened.close);
+    final repository = LocalExamRepository(reopened);
+    final restored = (await repository.watch().first).single;
+    expect(restored.name, '高等数学');
+    expect(restored.at, exam.at);
+    expect(restored.endsAt, exam.endsAt);
+    expect(restored.room, '工学馆 101');
+
+    await repository.delete('e');
+    expect(await repository.watch().first, isEmpty);
+  });
+
+  test('version 2 exams gain a default end time during migration', () async {
+    final db = AppDatabase(
+      NativeDatabase.memory(
+        setup: (sqlite) {
+          sqlite.execute('''
+            CREATE TABLE exam_rows (
+              id TEXT NOT NULL PRIMARY KEY, name TEXT NOT NULL,
+              at INTEGER NOT NULL, room TEXT NOT NULL
+            );
+            INSERT INTO exam_rows VALUES ('old', '旧考试', 1700000000, '考场');
+            PRAGMA user_version = 2;
+          ''');
+        },
+      ),
+    );
+    addTearDown(db.close);
+    final exam = (await LocalExamRepository(db).watch().first).single;
+    expect(exam.name, '旧考试');
+    expect(exam.endsAt.difference(exam.at), const Duration(hours: 1));
   });
 
   test(

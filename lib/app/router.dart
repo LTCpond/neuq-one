@@ -5,8 +5,7 @@ import 'package:go_router/go_router.dart';
 import '../core/auth/school_auth.dart';
 import '../core/database/school_data.dart';
 import '../core/theme/app_theme.dart';
-import '../features/grades/presentation/grades_page.dart';
-import '../features/grades/presentation/plan_completion_page.dart';
+import '../features/grades/presentation/academic_page.dart';
 import '../features/mail/presentation/campus_mail_page.dart';
 import '../features/profile/presentation/profile_page.dart';
 import '../features/profile/presentation/update_prompt.dart';
@@ -21,12 +20,14 @@ import '../features/timetable/presentation/timetable_page.dart';
 import 'login_page.dart';
 
 const _timetablePath = '/timetable';
+// The academic center keeps the existing branch path so saved tab state and
+// deep links to the former grades tab remain valid.
 const _gradesPath = '/grades';
 const _servicesPath = '/services';
 
 const _tabs = [
   (path: _timetablePath, label: '课表', icon: 'timetable', page: TimetablePage()),
-  (path: _gradesPath, label: '成绩', icon: 'grades', page: GradesPage()),
+  (path: _gradesPath, label: '学业', icon: 'academic', page: AcademicPage()),
   (path: _servicesPath, label: '服务', icon: 'services', page: ServicesPage()),
   (path: '/profile', label: '我的', icon: 'profile', page: ProfilePage()),
 ];
@@ -71,8 +72,7 @@ final routerProvider = Provider<GoRouter>((ref) {
                     if (tab.path == _gradesPath)
                       GoRoute(
                         path: 'plan-completion',
-                        parentNavigatorKey: rootNavigator,
-                        builder: (context, state) => const PlanCompletionPage(),
+                        redirect: (context, state) => _gradesPath,
                       ),
                     if (tab.path == _servicesPath) ...[
                       GoRoute(

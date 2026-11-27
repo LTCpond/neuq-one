@@ -52,6 +52,7 @@ class ExamRows extends Table {
   TextColumn get id => text()();
   TextColumn get name => text()();
   DateTimeColumn get at => dateTime()();
+  DateTimeColumn get endsAt => dateTime()();
   TextColumn get room => text()();
   @override
   Set<Column> get primaryKey => {id};
@@ -75,7 +76,7 @@ class AppDatabase extends _$AppDatabase {
     : super(executor ?? driftDatabase(name: name));
 
   @override
-  int get schemaVersion => 2;
+  int get schemaVersion => 3;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -85,6 +86,23 @@ class AppDatabase extends _$AppDatabase {
           await migrator.addColumn(gradeRows, gradeRows.format);
           await migrator.createTable(schoolCacheRows);
         });
+      }
+      if (from < 3) {
+        final examTables = await customSelect(
+          "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'exam_rows'",
+        ).get();
+        if (examTables.isEmpty) {
+          await migrator.createTable(examRows);
+        } else {
+          // Older versions only stored the start instant. Existing local exams
+          // keep their start time and receive a one-hour default duration.
+          await customStatement(
+            'ALTER TABLE exam_rows ADD COLUMN ends_at INTEGER NOT NULL DEFAULT 0',
+          );
+          await customStatement(
+            'UPDATE exam_rows SET ends_at = at + 3600 WHERE ends_at = 0',
+          );
+        }
       }
     },
     beforeOpen: (details) async => customStatement('PRAGMA foreign_keys = ON'),

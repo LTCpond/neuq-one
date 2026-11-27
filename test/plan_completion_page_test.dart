@@ -13,7 +13,7 @@ import 'package:neuq_one/features/grades/presentation/plan_completion/plan_compl
 import 'package:neuq_one/features/grades/presentation/plan_completion/plan_course_row.dart';
 import 'package:neuq_one/features/grades/presentation/plan_completion/plan_progress_card.dart';
 import 'package:neuq_one/features/grades/presentation/plan_completion/plan_status.dart';
-import 'package:neuq_one/features/grades/presentation/plan_completion_page.dart';
+import 'package:neuq_one/features/grades/presentation/plan_completion_section.dart';
 import 'package:neuq_one/features/timetable/domain/timetable.dart';
 
 void main() {
@@ -210,7 +210,15 @@ void main() {
   ) async {
     await _pumpPage(tester, report(), size: const Size(390, 1400));
 
-    expect(find.text('培养方案'), findsOneWidget);
+    final sync = find.text('培养方案 · 已同步');
+    expect(sync, findsOneWidget);
+    expect(find.textContaining('上次培养方案同步'), findsNothing);
+    expect(
+      tester.getTopLeft(sync).dy,
+      lessThan(
+        tester.getTopLeft(find.byKey(const ValueKey('plan-overview'))).dy,
+      ),
+    );
     expect(find.text('136'), findsOneWidget);
     expect(find.text('/ 167 学分'), findsOneWidget);
     expect(find.text('距离计划要求还差 31 学分'), findsOneWidget);
@@ -625,7 +633,6 @@ void main() {
     await tester.pump();
 
     expect(find.byType(PlanCompletionSkeleton), findsOneWidget);
-    expect(find.text('培养方案'), findsOneWidget);
   });
 
   testWidgets('failed request without cache offers retry', (tester) async {
@@ -781,11 +788,25 @@ Future<void> _pumpPage(
                     .copyWith(textScaler: TextScaler.linear(textScale)),
                 child: child!,
               ),
-        home: const PlanCompletionPage(),
+        home: const Scaffold(
+          appBar: _PlanTestHeader(),
+          body: PlanCompletionSection(),
+        ),
       ),
     ),
   );
   await tester.pumpAndSettle();
+}
+
+class _PlanTestHeader extends StatelessWidget implements PreferredSizeWidget {
+  const _PlanTestHeader();
+
+  @override
+  Size get preferredSize => const Size.fromHeight(kToolbarHeight);
+
+  @override
+  Widget build(BuildContext context) =>
+      AppBar(actions: const [PlanCompletionActions()]);
 }
 
 Widget _app({
@@ -810,7 +831,10 @@ Widget _app({
     supportedLocales: const [Locale('zh', 'CN')],
     localizationsDelegates: GlobalMaterialLocalizations.delegates,
     theme: appTheme(Brightness.light),
-    home: const PlanCompletionPage(),
+    home: const Scaffold(
+      appBar: _PlanTestHeader(),
+      body: PlanCompletionSection(),
+    ),
   ),
 );
 

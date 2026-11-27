@@ -1451,6 +1451,15 @@ class $ExamRowsTable extends ExamRows with TableInfo<$ExamRowsTable, ExamRow> {
     type: DriftSqlType.dateTime,
     requiredDuringInsert: true,
   );
+  static const VerificationMeta _endsAtMeta = const VerificationMeta('endsAt');
+  @override
+  late final GeneratedColumn<DateTime> endsAt = GeneratedColumn<DateTime>(
+    'ends_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: true,
+  );
   static const VerificationMeta _roomMeta = const VerificationMeta('room');
   @override
   late final GeneratedColumn<String> room = GeneratedColumn<String>(
@@ -1461,7 +1470,7 @@ class $ExamRowsTable extends ExamRows with TableInfo<$ExamRowsTable, ExamRow> {
     requiredDuringInsert: true,
   );
   @override
-  List<GeneratedColumn> get $columns => [id, name, at, room];
+  List<GeneratedColumn> get $columns => [id, name, at, endsAt, room];
   @override
   String get aliasedName => _alias ?? actualTableName;
   @override
@@ -1492,6 +1501,14 @@ class $ExamRowsTable extends ExamRows with TableInfo<$ExamRowsTable, ExamRow> {
     } else if (isInserting) {
       context.missing(_atMeta);
     }
+    if (data.containsKey('ends_at')) {
+      context.handle(
+        _endsAtMeta,
+        endsAt.isAcceptableOrUnknown(data['ends_at']!, _endsAtMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_endsAtMeta);
+    }
     if (data.containsKey('room')) {
       context.handle(
         _roomMeta,
@@ -1521,6 +1538,10 @@ class $ExamRowsTable extends ExamRows with TableInfo<$ExamRowsTable, ExamRow> {
         DriftSqlType.dateTime,
         data['${effectivePrefix}at'],
       )!,
+      endsAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}ends_at'],
+      )!,
       room: attachedDatabase.typeMapping.read(
         DriftSqlType.string,
         data['${effectivePrefix}room'],
@@ -1538,11 +1559,13 @@ class ExamRow extends DataClass implements Insertable<ExamRow> {
   final String id;
   final String name;
   final DateTime at;
+  final DateTime endsAt;
   final String room;
   const ExamRow({
     required this.id,
     required this.name,
     required this.at,
+    required this.endsAt,
     required this.room,
   });
   @override
@@ -1551,6 +1574,7 @@ class ExamRow extends DataClass implements Insertable<ExamRow> {
     map['id'] = Variable<String>(id);
     map['name'] = Variable<String>(name);
     map['at'] = Variable<DateTime>(at);
+    map['ends_at'] = Variable<DateTime>(endsAt);
     map['room'] = Variable<String>(room);
     return map;
   }
@@ -1560,6 +1584,7 @@ class ExamRow extends DataClass implements Insertable<ExamRow> {
       id: Value(id),
       name: Value(name),
       at: Value(at),
+      endsAt: Value(endsAt),
       room: Value(room),
     );
   }
@@ -1573,6 +1598,7 @@ class ExamRow extends DataClass implements Insertable<ExamRow> {
       id: serializer.fromJson<String>(json['id']),
       name: serializer.fromJson<String>(json['name']),
       at: serializer.fromJson<DateTime>(json['at']),
+      endsAt: serializer.fromJson<DateTime>(json['endsAt']),
       room: serializer.fromJson<String>(json['room']),
     );
   }
@@ -1583,22 +1609,30 @@ class ExamRow extends DataClass implements Insertable<ExamRow> {
       'id': serializer.toJson<String>(id),
       'name': serializer.toJson<String>(name),
       'at': serializer.toJson<DateTime>(at),
+      'endsAt': serializer.toJson<DateTime>(endsAt),
       'room': serializer.toJson<String>(room),
     };
   }
 
-  ExamRow copyWith({String? id, String? name, DateTime? at, String? room}) =>
-      ExamRow(
-        id: id ?? this.id,
-        name: name ?? this.name,
-        at: at ?? this.at,
-        room: room ?? this.room,
-      );
+  ExamRow copyWith({
+    String? id,
+    String? name,
+    DateTime? at,
+    DateTime? endsAt,
+    String? room,
+  }) => ExamRow(
+    id: id ?? this.id,
+    name: name ?? this.name,
+    at: at ?? this.at,
+    endsAt: endsAt ?? this.endsAt,
+    room: room ?? this.room,
+  );
   ExamRow copyWithCompanion(ExamRowsCompanion data) {
     return ExamRow(
       id: data.id.present ? data.id.value : this.id,
       name: data.name.present ? data.name.value : this.name,
       at: data.at.present ? data.at.value : this.at,
+      endsAt: data.endsAt.present ? data.endsAt.value : this.endsAt,
       room: data.room.present ? data.room.value : this.room,
     );
   }
@@ -1609,13 +1643,14 @@ class ExamRow extends DataClass implements Insertable<ExamRow> {
           ..write('id: $id, ')
           ..write('name: $name, ')
           ..write('at: $at, ')
+          ..write('endsAt: $endsAt, ')
           ..write('room: $room')
           ..write(')'))
         .toString();
   }
 
   @override
-  int get hashCode => Object.hash(id, name, at, room);
+  int get hashCode => Object.hash(id, name, at, endsAt, room);
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
@@ -1623,6 +1658,7 @@ class ExamRow extends DataClass implements Insertable<ExamRow> {
           other.id == this.id &&
           other.name == this.name &&
           other.at == this.at &&
+          other.endsAt == this.endsAt &&
           other.room == this.room);
 }
 
@@ -1630,12 +1666,14 @@ class ExamRowsCompanion extends UpdateCompanion<ExamRow> {
   final Value<String> id;
   final Value<String> name;
   final Value<DateTime> at;
+  final Value<DateTime> endsAt;
   final Value<String> room;
   final Value<int> rowid;
   const ExamRowsCompanion({
     this.id = const Value.absent(),
     this.name = const Value.absent(),
     this.at = const Value.absent(),
+    this.endsAt = const Value.absent(),
     this.room = const Value.absent(),
     this.rowid = const Value.absent(),
   });
@@ -1643,16 +1681,19 @@ class ExamRowsCompanion extends UpdateCompanion<ExamRow> {
     required String id,
     required String name,
     required DateTime at,
+    required DateTime endsAt,
     required String room,
     this.rowid = const Value.absent(),
   }) : id = Value(id),
        name = Value(name),
        at = Value(at),
+       endsAt = Value(endsAt),
        room = Value(room);
   static Insertable<ExamRow> custom({
     Expression<String>? id,
     Expression<String>? name,
     Expression<DateTime>? at,
+    Expression<DateTime>? endsAt,
     Expression<String>? room,
     Expression<int>? rowid,
   }) {
@@ -1660,6 +1701,7 @@ class ExamRowsCompanion extends UpdateCompanion<ExamRow> {
       if (id != null) 'id': id,
       if (name != null) 'name': name,
       if (at != null) 'at': at,
+      if (endsAt != null) 'ends_at': endsAt,
       if (room != null) 'room': room,
       if (rowid != null) 'rowid': rowid,
     });
@@ -1669,6 +1711,7 @@ class ExamRowsCompanion extends UpdateCompanion<ExamRow> {
     Value<String>? id,
     Value<String>? name,
     Value<DateTime>? at,
+    Value<DateTime>? endsAt,
     Value<String>? room,
     Value<int>? rowid,
   }) {
@@ -1676,6 +1719,7 @@ class ExamRowsCompanion extends UpdateCompanion<ExamRow> {
       id: id ?? this.id,
       name: name ?? this.name,
       at: at ?? this.at,
+      endsAt: endsAt ?? this.endsAt,
       room: room ?? this.room,
       rowid: rowid ?? this.rowid,
     );
@@ -1693,6 +1737,9 @@ class ExamRowsCompanion extends UpdateCompanion<ExamRow> {
     if (at.present) {
       map['at'] = Variable<DateTime>(at.value);
     }
+    if (endsAt.present) {
+      map['ends_at'] = Variable<DateTime>(endsAt.value);
+    }
     if (room.present) {
       map['room'] = Variable<String>(room.value);
     }
@@ -1708,6 +1755,7 @@ class ExamRowsCompanion extends UpdateCompanion<ExamRow> {
           ..write('id: $id, ')
           ..write('name: $name, ')
           ..write('at: $at, ')
+          ..write('endsAt: $endsAt, ')
           ..write('room: $room, ')
           ..write('rowid: $rowid')
           ..write(')'))
@@ -3161,6 +3209,7 @@ typedef $$ExamRowsTableCreateCompanionBuilder = ExamRowsCompanion Function({
   required String id,
   required String name,
   required DateTime at,
+  required DateTime endsAt,
   required String room,
   Value<int> rowid,
 });
@@ -3168,6 +3217,7 @@ typedef $$ExamRowsTableUpdateCompanionBuilder = ExamRowsCompanion Function({
   Value<String> id,
   Value<String> name,
   Value<DateTime> at,
+  Value<DateTime> endsAt,
   Value<String> room,
   Value<int> rowid,
 });
@@ -3193,6 +3243,11 @@ class $$ExamRowsTableFilterComposer
 
   ColumnFilters<DateTime> get at => $composableBuilder(
     column: $table.at,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get endsAt => $composableBuilder(
+    column: $table.endsAt,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -3226,6 +3281,11 @@ class $$ExamRowsTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
+  ColumnOrderings<DateTime> get endsAt => $composableBuilder(
+    column: $table.endsAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   ColumnOrderings<String> get room => $composableBuilder(
     column: $table.room,
     builder: (column) => ColumnOrderings(column),
@@ -3249,6 +3309,9 @@ class $$ExamRowsTableAnnotationComposer
 
   GeneratedColumn<DateTime> get at =>
       $composableBuilder(column: $table.at, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get endsAt =>
+      $composableBuilder(column: $table.endsAt, builder: (column) => column);
 
   GeneratedColumn<String> get room =>
       $composableBuilder(column: $table.room, builder: (column) => column);
@@ -3285,12 +3348,14 @@ class $$ExamRowsTableTableManager
                 Value<String> id = const Value.absent(),
                 Value<String> name = const Value.absent(),
                 Value<DateTime> at = const Value.absent(),
+                Value<DateTime> endsAt = const Value.absent(),
                 Value<String> room = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => ExamRowsCompanion(
                 id: id,
                 name: name,
                 at: at,
+                endsAt: endsAt,
                 room: room,
                 rowid: rowid,
               ),
@@ -3299,12 +3364,14 @@ class $$ExamRowsTableTableManager
                 required String id,
                 required String name,
                 required DateTime at,
+                required DateTime endsAt,
                 required String room,
                 Value<int> rowid = const Value.absent(),
               }) => ExamRowsCompanion.insert(
                 id: id,
                 name: name,
                 at: at,
+                endsAt: endsAt,
                 room: room,
                 rowid: rowid,
               ),

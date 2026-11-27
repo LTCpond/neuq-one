@@ -7,6 +7,7 @@ import '../../../core/theme/app_theme.dart';
 import '../../../core/time/campus_clock.dart';
 import '../../../core/time/neuq_periods.dart';
 import '../../../core/widgets/campus_components.dart';
+import '../../../core/widgets/campus_segmented_picker.dart';
 import '../../../core/widgets/screen.dart';
 import '../data/classroom_view_preferences.dart';
 import '../data/public_classrooms.dart';
@@ -197,8 +198,10 @@ class _ClassroomsPageState extends ConsumerState<ClassroomsPage> {
               ],
             ),
             const SizedBox(height: 8),
-            _BuildingPicker(
+            CampusSegmentedPicker<CampusBuilding>(
+              values: CampusBuilding.values,
               selected: view.building,
+              labelOf: (building) => building.label,
               onChanged: selection.selectBuilding,
             ),
             const SizedBox(height: 8),
@@ -331,70 +334,6 @@ class _ClassroomsPageState extends ConsumerState<ClassroomsPage> {
     final time = instant.toUtc().add(campusOffset);
     final clock = clockLabel(time.hour * 60 + time.minute);
     return calendarDate(time) == _today ? clock : '${shortDate(time)} $clock';
-  }
-}
-
-class _BuildingPicker extends StatelessWidget {
-  const _BuildingPicker({required this.selected, required this.onChanged});
-
-  final CampusBuilding selected;
-  final ValueChanged<CampusBuilding> onChanged;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = Theme.of(context).colorScheme;
-    return Material(
-      color: colors.surfaceContainerHigh,
-      borderRadius: BorderRadius.circular(14),
-      child: Padding(
-        padding: const EdgeInsets.all(4),
-        child: Row(
-          children: [
-            for (final building in CampusBuilding.values)
-              Expanded(
-                child: Semantics(
-                  button: true,
-                  selected: building == selected,
-                  child: Ink(
-                    decoration: BoxDecoration(
-                      color: building == selected
-                          ? campusBlue
-                          : Colors.transparent,
-                      borderRadius: BorderRadius.circular(11),
-                    ),
-                    child: InkWell(
-                      borderRadius: BorderRadius.circular(11),
-                      onTap: () => onChanged(building),
-                      child: ConstrainedBox(
-                        constraints: const BoxConstraints(minHeight: 38),
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(
-                            vertical: 7,
-                            horizontal: 4,
-                          ),
-                          child: Center(
-                            child: Text(
-                              building.label,
-                              textAlign: TextAlign.center,
-                              style: TextStyle(
-                                fontSize: 14,
-                                fontWeight: FontWeight.w700,
-                                color: building == selected
-                                    ? Colors.white
-                                    : colors.onSurfaceVariant,
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-          ],
-        ),
-      ),
-    );
   }
 }
 

@@ -23,11 +23,15 @@ import 'package:neuq_one/core/storage/settings.dart';
 import 'package:neuq_one/core/network/public_data_client.dart';
 import 'package:neuq_one/core/time/campus_clock.dart';
 import 'package:neuq_one/core/time/neuq_periods.dart';
+import 'package:neuq_one/features/exams/data/local_exams.dart';
+import 'package:neuq_one/features/exams/domain/exam.dart';
+import 'package:neuq_one/features/exams/presentation/exams_section.dart';
 import 'package:neuq_one/features/grades/data/local_grades.dart';
 import 'package:neuq_one/features/grades/data/neuq_plan_completion.dart';
 import 'package:neuq_one/features/grades/domain/grades.dart';
 import 'package:neuq_one/features/grades/domain/plan_completion.dart';
-import 'package:neuq_one/features/grades/presentation/plan_completion_page.dart';
+import 'package:neuq_one/features/grades/presentation/academic_page.dart';
+import 'package:neuq_one/features/grades/presentation/plan_completion_section.dart';
 import 'package:neuq_one/features/mail/data/campus_mail.dart';
 import 'package:neuq_one/features/mail/presentation/campus_mail_page.dart';
 import 'package:neuq_one/features/profile/data/course_reminders.dart';
@@ -250,15 +254,15 @@ void main() {
       );
       expect(destinations.map((destination) => destination.label), [
         '课表',
-        '成绩',
+        '学业',
         '服务',
         '我的',
       ]);
       expect(find.text('下一节课'), findsNothing);
       expect(find.text('今日课程'), findsNothing);
       expect(find.text('最近考试'), findsNothing);
-      await _tab(tester, '成绩');
-      expect(find.text('考试安排'), findsNothing);
+      await _tab(tester, '学业');
+      expect(find.byType(ExamSection), findsNothing);
       expect(find.byTooltip('GPA 计算器'), findsNothing);
       expect(find.byTooltip('查看演示成绩'), findsNothing);
       router.go('/');
@@ -271,7 +275,7 @@ void main() {
   _appTest(
     'school grades display the GPA returned by the school',
     (tester) async {
-      await _tab(tester, '成绩');
+      await _tab(tester, '学业');
       expect(find.text('学期 GPA'), findsOneWidget);
       expect(find.text('累计 GPA'), findsOneWidget);
       expect(find.text('3.6721'), findsOneWidget);
@@ -305,7 +309,7 @@ void main() {
   _appTest(
     'missing semester GPA is calculated and fractional credits display cleanly',
     (tester) async {
-      await _tab(tester, '成绩');
+      await _tab(tester, '学业');
       expect(find.text('学期 GPA'), findsOneWidget);
       expect(find.text('2.8750'), findsOneWidget);
       expect(find.text('1.5 学分'), findsOneWidget);
@@ -359,7 +363,7 @@ void main() {
       tester.view.devicePixelRatio = 1;
       addTearDown(tester.view.reset);
       await tester.pumpAndSettle();
-      await _tab(tester, '成绩');
+      await _tab(tester, '学业');
       final container = ProviderScope.containerOf(
         tester.element(find.byType(NavigationBar)),
       );
@@ -467,13 +471,14 @@ void main() {
 
   final planRefreshes = <SchoolDataSet>[];
   _appTest(
-    'grades open the plan audit and expand courses from the last snapshot',
+    'academic center opens the plan audit and expands courses from the last snapshot',
     (tester) async {
-      await _tab(tester, '成绩');
+      await _tab(tester, '学业');
+      expect(find.byType(AcademicPage), findsOneWidget);
       expect(planRefreshes, isNot(contains(SchoolDataSet.planCompletion)));
-      await tester.tap(find.text('培养方案完成情况'));
+      await tester.tap(find.text('培养方案'));
       await tester.pumpAndSettle();
-      expect(find.byType(PlanCompletionPage), findsOneWidget);
+      expect(find.byType(PlanCompletionSection), findsOneWidget);
       expect(find.text('培养方案'), findsOneWidget);
       expect(
         planRefreshes.where(
@@ -484,9 +489,13 @@ void main() {
       expect(find.text('距离计划要求还差 4 学分'), findsOneWidget);
       expect(find.text('2/3'), findsOneWidget);
       expect(find.text('示例数学'), findsNothing);
+      await tester.ensureVisible(find.text('通识类课程'));
+      await tester.pumpAndSettle();
       await tester.tap(find.text('通识类课程'));
       await tester.pumpAndSettle();
       expect(find.text('科学基础'), findsOneWidget);
+      await tester.ensureVisible(find.text('科学基础'));
+      await tester.pumpAndSettle();
       await tester.tap(find.text('科学基础'));
       await tester.pumpAndSettle();
       expect(find.text('示例数学'), findsOneWidget);
@@ -495,7 +504,7 @@ void main() {
       // conveyed by the semantic status icon.
       expect(find.text('已通过'), findsOneWidget);
       final planList = find.descendant(
-        of: find.byType(PlanCompletionPage),
+        of: find.byType(PlanCompletionSection),
         matching: find.byType(Scrollable),
       );
       final pending = find.byIcon(Icons.schedule_rounded);
@@ -512,6 +521,316 @@ void main() {
         throw SchoolRequestFailure.unavailable;
       }
     },
+  );
+
+  final sectionRefreshes = <SchoolDataSet>[];
+  _appTest(
+    'academic sections keep their actions, filters and data when switching',
+    (tester) async {
+      await _tab(tester, '学业');
+      expect(find.byType(AcademicPage), findsOneWidget);
+      _router(tester).go('/grades/plan-completion');
+      await tester.pumpAndSettle();
+      expect(
+        _router(tester).routeInformationProvider.value.uri.path,
+        '/grades',
+      );
+      expect(find.text('学业中心'), findsOneWidget);
+      expect(find.text('成绩'), findsOneWidget);
+      expect(find.text('培养方案'), findsOneWidget);
+      expect(find.text('考试安排'), findsOneWidget);
+      expect(find.byTooltip('选择学期'), findsOneWidget);
+      expect(find.byTooltip('刷新教务成绩'), findsOneWidget);
+      expect(find.byTooltip('刷新培养方案'), findsNothing);
+      expect(find.byTooltip('添加考试'), findsNothing);
+
+      await tester.tap(find.byTooltip('选择学期'));
+      await tester.pumpAndSettle();
+      await tester.tap(
+        find.widgetWithText(CheckedPopupMenuItem<String>, '全部学期'),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('教务累计 GPA'), findsOneWidget);
+      final gradesLoads = sectionRefreshes
+          .where((section) => section == SchoolDataSet.grades)
+          .length;
+      expect(gradesLoads, 1);
+
+      await tester.tap(find.text('培养方案'));
+      await tester.pumpAndSettle();
+      expect(find.byTooltip('刷新培养方案'), findsOneWidget);
+      expect(find.byTooltip('选择学期'), findsNothing);
+      expect(find.byTooltip('刷新教务成绩'), findsNothing);
+      expect(find.byTooltip('添加考试'), findsNothing);
+      await tester.ensureVisible(find.text('通识类课程'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('通识类课程'));
+      await tester.pumpAndSettle();
+      expect(find.text('科学基础'), findsOneWidget);
+      final planScroll = find
+          .descendant(
+            of: find.byType(PlanCompletionSection),
+            matching: find.byType(Scrollable),
+          )
+          .first;
+      await tester.drag(planScroll, const Offset(0, -160));
+      await tester.pumpAndSettle();
+      final planOffset = tester
+          .state<ScrollableState>(planScroll)
+          .position
+          .pixels;
+      expect(planOffset, greaterThan(0));
+      final planLoads = sectionRefreshes
+          .where((section) => section == SchoolDataSet.planCompletion)
+          .length;
+
+      await tester.tap(find.text('考试安排'));
+      await tester.pumpAndSettle();
+      expect(find.byTooltip('添加考试'), findsOneWidget);
+      expect(find.byTooltip('选择学期'), findsNothing);
+      expect(find.byTooltip('刷新培养方案'), findsNothing);
+      expect(find.text('该板块不从教务处同步数据，考试安排由学生手动添加。'), findsOneWidget);
+      expect(find.text('暂无考试安排'), findsOneWidget);
+
+      await tester.tap(find.text('培养方案'));
+      await tester.pumpAndSettle();
+      expect(find.text('科学基础'), findsOneWidget);
+      final restoredPlanScroll = find
+          .descendant(
+            of: find.byType(PlanCompletionSection),
+            matching: find.byType(Scrollable),
+          )
+          .first;
+      expect(
+        tester.state<ScrollableState>(restoredPlanScroll).position.pixels,
+        planOffset,
+      );
+      expect(
+        sectionRefreshes
+            .where((section) => section == SchoolDataSet.planCompletion)
+            .length,
+        planLoads,
+      );
+
+      await tester.tap(find.text('成绩'));
+      await tester.pumpAndSettle();
+      expect(find.text('教务累计 GPA'), findsOneWidget);
+      expect(
+        sectionRefreshes
+            .where((section) => section == SchoolDataSet.grades)
+            .length,
+        gradesLoads,
+      );
+    },
+    schoolGrades: SchoolGradeBook(
+      [
+        Semester(
+          id: 'school:term',
+          name: '教务学期',
+          start: DateTime.utc(2026, 9, 7),
+          weeks: 18,
+        ),
+      ],
+      [
+        const Grade(
+          id: 'school:grade',
+          semesterId: 'school:term',
+          name: '测试课程',
+          credit: 3,
+          score: 90,
+          kind: GradeKind.required,
+        ),
+      ],
+      semesterGpa: const {'school:term': 3.6721},
+      cumulativeGpa: 3.6502,
+    ),
+    planCompletion: readNeuqPlanCompletion(
+      planCompletionHtml,
+      schoolSubjectForStudentCode(planFixtureStudent)!,
+    ),
+    onRefresh: sectionRefreshes.add,
+  );
+
+  final today = calendarDate(campusNow());
+  final currentTerm = Semester(
+    id: 'local:term',
+    name: '当前学期',
+    start: mondayOf(today),
+    weeks: 18,
+  );
+  _appTest(
+    'exam subjects deduplicate and only custom entries show an input',
+    (tester) async {
+      await _tab(tester, '学业');
+      await tester.tap(find.text('考试安排'));
+      await tester.pumpAndSettle();
+      expect(find.text('暂无考试安排'), findsOneWidget);
+
+      await tester.tap(find.byTooltip('添加考试'));
+      await tester.pumpAndSettle();
+      final nameField = find.byKey(const ValueKey('exam-subject-name'));
+      final textField = tester.widget<TextField>(
+        find.descendant(of: nameField, matching: find.byType(TextField)),
+      );
+      expect(textField.decoration?.filled, isTrue);
+      final border = textField.decoration?.border;
+      expect(border, isA<OutlineInputBorder>());
+      expect((border! as OutlineInputBorder).borderSide, BorderSide.none);
+      final start = find.byKey(const ValueKey('exam-start-time'));
+      final end = find.byKey(const ValueKey('exam-end-time'));
+      expect(tester.getTopLeft(start).dy, tester.getTopLeft(end).dy);
+      expect(tester.getTopRight(start).dx, lessThan(tester.getTopLeft(end).dx));
+
+      await tester.tap(find.text('自定义科目'));
+      await tester.pumpAndSettle();
+      expect(find.text('线性代数'), findsOneWidget);
+      await tester.tap(find.text('线性代数'));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('exam-subject-name')), findsNothing);
+      await tester.enterText(
+        find.byKey(const ValueKey('exam-room')),
+        '工学馆 101',
+      );
+      await tester.tap(find.widgetWithText(FilledButton, '保存'));
+      await tester.pumpAndSettle();
+      expect(find.text('线性代数'), findsOneWidget);
+      expect(find.text('09:00–11:00'), findsOneWidget);
+      expect(find.text('工学馆 101'), findsOneWidget);
+      expect(find.text('暂无考试安排'), findsNothing);
+
+      await tester.tap(find.text('线性代数'));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('exam-subject-name')), findsNothing);
+      await tester.tap(find.byKey(const ValueKey('exam-subject-dropdown')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('自定义科目'));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('exam-subject-name')), findsOneWidget);
+      await tester.enterText(
+        find.byKey(const ValueKey('exam-subject-name')),
+        '高等数学 A',
+      );
+      await tester.tap(find.widgetWithText(FilledButton, '保存'));
+      await tester.pumpAndSettle();
+      expect(find.text('高等数学 A'), findsOneWidget);
+
+      await tester.tap(find.text('成绩'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('考试安排'));
+      await tester.pumpAndSettle();
+      expect(find.text('高等数学 A'), findsOneWidget);
+
+      await tester.tap(find.byTooltip('考试选项'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('删除').last);
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(FilledButton, '删除'));
+      await tester.pumpAndSettle();
+      expect(find.text('暂无考试安排'), findsOneWidget);
+    },
+    initialTimetable: Timetable(
+      [currentTerm],
+      [
+        _sampleCourse('course-a', '线性代数', currentTerm, DateTime.monday, 1, 2),
+        _sampleCourse('course-b', '线性代数', currentTerm, DateTime.tuesday, 3, 4),
+      ],
+    ),
+  );
+
+  _appTest(
+    'exam cards group by date under independent headings',
+    (tester) async {
+      await _tab(tester, '学业');
+      await tester.tap(find.text('考试安排'));
+      await tester.pumpAndSettle();
+      final yesterday = today.subtract(const Duration(days: 1));
+      final tomorrow = today.add(const Duration(days: 1));
+      String heading(DateTime date) =>
+          '${shortDate(date)} ${weekdayLabel(date.weekday)}';
+      expect(find.text('今天 · ${heading(today)}'), findsOneWidget);
+      expect(find.text('明天 · ${heading(tomorrow)}'), findsOneWidget);
+      expect(find.text(heading(yesterday)), findsOneWidget);
+      expect(find.text('今日考试甲'), findsOneWidget);
+      expect(find.text('今日考试乙'), findsOneWidget);
+      expect(
+        tester.getTopLeft(find.text(heading(yesterday))).dy,
+        lessThan(tester.getTopLeft(find.text('今天 · ${heading(today)}')).dy),
+      );
+      expect(
+        tester.getTopLeft(find.text('今天 · ${heading(today)}')).dy,
+        lessThan(tester.getTopLeft(find.text('明天 · ${heading(tomorrow)}')).dy),
+      );
+      final past = tester.widget<Opacity>(
+        find
+            .ancestor(of: find.text('昨日考试'), matching: find.byType(Opacity))
+            .first,
+      );
+      final upcoming = tester.widget<Opacity>(
+        find
+            .ancestor(of: find.text('明日考试'), matching: find.byType(Opacity))
+            .first,
+      );
+      expect(past.opacity, lessThan(1));
+      expect(upcoming.opacity, 1);
+    },
+    initialExams: [
+      _testExam('yesterday', '昨日考试', today.subtract(const Duration(days: 1))),
+      _testExam('today-a', '今日考试甲', today),
+      _testExam('today-b', '今日考试乙', today, start: 14),
+      _testExam('tomorrow', '明日考试', today.add(const Duration(days: 1))),
+    ],
+  );
+
+  _appTest(
+    'academic center fits a narrow screen with large text',
+    (tester) async {
+      tester.view.physicalSize = const Size(320, 640);
+      tester.view.devicePixelRatio = 1;
+      tester.platformDispatcher.textScaleFactorTestValue = 1.35;
+      addTearDown(tester.view.reset);
+      addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+      await tester.pumpAndSettle();
+      await _tab(tester, '学业');
+      expect(find.text('学业中心'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+      await tester.tap(find.text('培养方案'));
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+      await tester.tap(find.text('考试安排'));
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+      expect(find.text('该板块不从教务处同步数据，考试安排由学生手动添加。'), findsOneWidget);
+      expect(find.text('高等数学'), findsOneWidget);
+      await tester.tap(find.byTooltip('添加考试'));
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+      await tester.tap(find.widgetWithText(TextButton, '取消'));
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+    },
+    schoolGrades: SchoolGradeBook(
+      [
+        Semester(
+          id: 'school:term',
+          name: '教务学期',
+          start: DateTime.utc(2026, 9, 7),
+          weeks: 18,
+        ),
+      ],
+      [
+        const Grade(
+          id: 'school:grade',
+          semesterId: 'school:term',
+          name: '测试课程',
+          credit: 3,
+          score: 90,
+          kind: GradeKind.required,
+        ),
+      ],
+      semesterGpa: const {'school:term': 3.6721},
+      cumulativeGpa: 3.6502,
+    ),
+    initialExams: [_testExam('narrow', '高等数学', today)],
   );
 
   final refreshed = <SchoolDataSet>[];
@@ -567,8 +886,8 @@ void main() {
           .week;
       expect(week, initialWeek + 1);
 
-      await _tab(tester, '成绩');
-      expect(find.text('成绩中心'), findsOneWidget);
+      await _tab(tester, '学业');
+      expect(find.text('学业中心'), findsOneWidget);
       expect(find.text(sampleTerm.name), findsOneWidget);
       final gradeSemester = find.descendant(
         of: find.byType(AppBar),
@@ -584,8 +903,10 @@ void main() {
       expect(find.byIcon(Icons.refresh_rounded), findsOneWidget);
       await _tab(tester, '服务');
       expect(find.text('校园服务'), findsOneWidget);
+      await tester.scrollUntilVisible(find.text('校园网').hitTestable(), 160);
       expect(find.text('校园网'), findsOneWidget);
       expect(find.text('图书馆'), findsNothing);
+      await tester.scrollUntilVisible(find.text('空教室').hitTestable(), -160);
       expect(find.text('校园卡'), findsOneWidget);
       await tester.tap(find.text('空教室'));
       await tester.pumpAndSettle();
@@ -755,7 +1076,7 @@ void main() {
   );
 
   _appTest('manual grade contributes to GPA', (tester) async {
-    await _tab(tester, '成绩');
+    await _tab(tester, '学业');
     await _createSemester(tester);
     await tester.tap(find.text('录入成绩'));
     await tester.pumpAndSettle();
@@ -903,7 +1224,7 @@ void main() {
         (_) async => throw PlatformException(code: 'preview-unavailable'),
       );
       await _tab(tester, '服务');
-      final entry = find.text('学校政策');
+      final entry = find.text('学校政策').hitTestable();
       await tester.scrollUntilVisible(entry, 120);
       await tester.tap(entry);
       await tester.pumpAndSettle();
@@ -1362,6 +1683,7 @@ void _appTest(
   SchoolGradeBook? schoolGrades,
   PlanCompletion? planCompletion,
   Timetable? initialTimetable,
+  List<Exam>? initialExams,
   CampusCardBalance? campusCardBalance,
   CampusCardRepository? campusCardRepository,
   http.Response Function()? classroomResponse,
@@ -1378,18 +1700,25 @@ void _appTest(
   testWidgets(description, (tester) async {
     final timetable = _TestTimetable();
     final grades = _TestGrades();
+    final exams = _TestExams();
     final classroomCache = _WidgetClassroomCache();
     final classroomClient = MockClient(
       (_) async => classroomResponse?.call() ?? http.Response('', 503),
     );
     addTearDown(classroomCache.close);
     addTearDown(classroomClient.close);
+    addTearDown(exams.close);
     if (initialTimetable != null) {
       for (final semester in initialTimetable.semesters) {
         await timetable.saveSemester(semester);
       }
       for (final course in initialTimetable.courses) {
         await timetable.saveCourse(course);
+      }
+    }
+    if (initialExams != null) {
+      for (final exam in initialExams) {
+        await exams.save(exam);
       }
     }
     try {
@@ -1463,6 +1792,7 @@ void _appTest(
             ),
             timetableRepositoryProvider.overrideWithValue(timetable),
             gradesRepositoryProvider.overrideWithValue(grades),
+            examRepositoryProvider.overrideWithValue(exams),
             settingsProvider.overrideWith(_TestSettings.new),
             reminderSyncProvider.overrideWith((ref) async {
               onReminderSync?.call();
@@ -1547,6 +1877,14 @@ Course _sampleCourse(
   endMinute: neuqPeriods[end - 1].end,
   weeks: const [2],
   colorIndex: 0,
+);
+
+Exam _testExam(String id, String name, DateTime date, {int start = 9}) => Exam(
+  id: id,
+  name: name,
+  at: campusInstant(date, start * 60),
+  endsAt: campusInstant(date, start * 60 + 120),
+  room: '测试楼',
 );
 
 Future<void> _tab(WidgetTester tester, String title) async {
@@ -1726,5 +2064,33 @@ class _TestGrades implements GradesRepository {
   Future<void> delete(String id) async {
     _grades.remove(id);
     changes.add(_grades.values.toList());
+  }
+}
+
+class _TestExams implements ExamRepository {
+  final changes = StreamController<List<Exam>>.broadcast();
+  final _exams = <String, Exam>{};
+
+  List<Exam> get _sorted =>
+      _exams.values.toList()..sort((a, b) => a.at.compareTo(b.at));
+
+  void close() => changes.close();
+
+  @override
+  Stream<List<Exam>> watch() => Stream.multi((controller) {
+    controller.add(_sorted);
+    controller.onCancel = changes.stream.listen(controller.add).cancel;
+  });
+
+  @override
+  Future<void> save(Exam exam) async {
+    _exams[exam.id] = exam;
+    changes.add(_sorted);
+  }
+
+  @override
+  Future<void> delete(String id) async {
+    _exams.remove(id);
+    changes.add(_sorted);
   }
 }
