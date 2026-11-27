@@ -16,7 +16,6 @@ import 'cache_management_page.dart';
 import 'diagnostics_page.dart';
 import 'reminder_settings_page.dart';
 import 'update_prompt.dart';
-import 'webvpn_settings_page.dart';
 
 const _repositoryUrl = String.fromEnvironment(
   'NEUQ_ONE_REPOSITORY_URL',
@@ -57,11 +56,11 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
   }
 
   Future<void> _forgetCredentials() => _run(() async {
-    final deleted = await ref
-        .read(schoolSessionProvider.notifier)
-        .forgetPassword();
-    if (deleted && mounted) ref.invalidate(rememberedSchoolPasswordProvider);
-    return deleted ? '已删除本地保存的学号与密码' : null;
+    final subject = ref.read(schoolSessionProvider).asData?.value?.subject;
+    if (subject == null) return null;
+    await ref.read(schoolAuthRepositoryProvider).forgetPassword(subject);
+    if (mounted) ref.invalidate(rememberedSchoolPasswordProvider);
+    return '已删除本地保存的学号与密码';
   });
 
   Future<void> _checkForUpdate() async {
@@ -191,17 +190,6 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
                               ),
                         onTap: () =>
                             _openSettings(const ReminderSettingsPage()),
-                      ),
-                      const SizedBox(height: 6),
-                      _ProfileTile(
-                        icon: const Icon(Icons.vpn_lock_outlined),
-                        title: 'WebVPN',
-                        subtitle: '访问策略与空闲断开',
-                        accent: (
-                          colors.secondaryContainer,
-                          colors.onSecondaryContainer,
-                        ),
-                        onTap: () => _openSettings(const WebVpnSettingsPage()),
                       ),
                     ],
                   ),

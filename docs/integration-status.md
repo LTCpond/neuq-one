@@ -12,9 +12,7 @@
 | 校园卡 | 打开页面或更新余额时，可用已有统一认证会话换取校园卡专用票据。余额按账号加密保存。校方充值页可跳转官方微信或支付宝收银台 | 校方要求额外验证时可在校园卡页完成。免重复登录和 App 内充值跳转待真机验证 |
 | 校园邮箱 | 使用 TLS 加密的 IMAP/SMTP 接入东北大学学生邮箱。在 App 内查看文件夹和邮件、搜索、收发及保存附件。客户端专用密码按校内账号存入系统安全存储 | 在学校邮箱网页启用 IMAP/SMTP 并生成客户端专用密码 |
 | 就业活动 | 同步公开就业信息网首页的最新宣讲会和招聘会，缓存有效期 30 分钟，刷新失败时保留上次结果 | 浏览器可打开官方详情和完整列表 |
-| 校园网站 | 教务系统、一网通办、校园网、校外远程资源访问系统在系统浏览器打开 | 按各官方站点的访问和认证要求 |
-| CampusAccess | 固定只读资源的直连和 WebVPN 选择、范围校验、脱敏诊断。注册了学校公开 WebVPN 使用说明的直连入口 | 直连说明来源为学校公开网站。原生 VPN 路由使用模拟服务测试，未注册已授权的真实 VPN 资源 |
-| WebVPN | 官方浏览器门户和应用内设置。原生会话管理支持按账号隔离、按需认证、取消和空闲清理 | 原生协议适配默认关闭。需校方确认受支持的原生流程与资源范围，并验证单终端行为 |
+| 校园网站 | 教务系统、一网通办、校园网、WebVPN 在系统浏览器打开 | 按各官方站点的访问和认证要求 |
 
 ## 官方依据
 
@@ -28,7 +26,6 @@
 - 教务学期缺少日期时使用对应学年的学校校历。[2024–2025 学年](https://jwc.neuq.edu.cn/__local/D/D9/F7/9CF57A987309D181E978B236AB9_FEC9E4A8_75240.pdf) · [2025–2026 学年](https://jwc.neuq.edu.cn/__local/0/54/97/9B9DDB54B6F8ECA0DF7EDA36F99_42399B7E_74D28.pdf) · [2026–2027 学年](https://jwc.neuq.edu.cn/info/1077/3582.htm)
 - [东秦教〔2025〕17 号](https://jwc.neuq.edu.cn/__local/8/D5/BA/B14A577547B0111B7BA1B241E2B_7DEA94A5_3523D.pdf)和[东秦教〔2019〕16 号](https://jwc.neuq.edu.cn/__local/B/41/42/D64F2600C48B924B4A9C4501BA8_BFEF2336_2FEF6.pdf)分别用于对应年级的本地绩点计算。
 - 网页入口来自[教务系统](https://jwxt.neuq.edu.cn/eams/localLogin.action)、[学校官网](https://www.neuq.edu.cn/)和[WebVPN](https://vpn.neuq.edu.cn/)。
-- 官方说明确认在浏览器使用 CAS 登录、从门户选择获授权资源，同一账号同时只能登录一个终端。匿名访问门户观察到设备检查跳转。应用内不会尝试模拟该检查。WebVPN 的授权资源路径、Cookie 及独立注销方式仍待验收。[学校使用说明](https://xxhb.neuq.edu.cn/info/1018/1434.htm) · [CampusAccess 验证边界](campus-access.md)
 - 校园地图的资源路径和发布流程见 Data 仓库。[静态资源与校园地图](https://github.com/LTCpond/neuq-one-data/blob/main/docs/static-assets.md)
 - [一网通办](https://eone.neuq.edu.cn/)的「推荐服务 → 校园卡」跳转到[校园卡网页](https://cardmobile.neuq.edu.cn/home/toHomePage)，未登录时由学校统一身份认证处理。[学校校园卡指南](https://xxhb.neuq.edu.cn/info/1018/2223.htm)
 - 东北大学学生邮箱使用 `@mails.neu.edu.cn`，迁移上云前开通的账号继续使用 `@stu.neu.edu.cn`。[学生邮箱注册和登录指南](https://xwb.neu.edu.cn/10178/list.htm)

@@ -5,8 +5,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../core/auth/school_auth.dart';
 import '../core/database/school_data.dart';
 import '../core/diagnostics/diagnostics.dart';
-import '../core/network/campus_access/campus_access_providers.dart';
-import '../core/network/campus_access/webvpn_session_manager.dart';
 import '../core/storage/settings.dart';
 import '../core/theme/app_theme.dart';
 import '../features/profile/data/course_reminders.dart';
@@ -26,20 +24,14 @@ class _NeuqOneAppState extends ConsumerState<NeuqOneApp> {
   static const _schoolResumeInterval = Duration(minutes: 5);
   DateTime? _backgroundedAt;
   late final AppLifecycleListener _lifecycle;
-  late final WebVpnSessionManager _webVpn;
 
   @override
   void initState() {
     super.initState();
-    _webVpn = ref.read(webVpnSessionManagerProvider);
-    final state = WidgetsBinding.instance.lifecycleState;
-    _webVpn.setForeground(state == null || state == AppLifecycleState.resumed);
     _lifecycle = AppLifecycleListener(
       onHide: _recordBackgroundTime,
       onPause: _recordBackgroundTime,
       onResume: () {
-        _webVpn.setForeground(true);
-        ref.read(campusAccessClientProvider).networkChanged();
         final session = ref.read(schoolSessionProvider).asData?.value;
         final backgroundedAt = _backgroundedAt;
         _backgroundedAt = null;
@@ -53,10 +45,8 @@ class _NeuqOneAppState extends ConsumerState<NeuqOneApp> {
     );
   }
 
-  void _recordBackgroundTime() {
-    _webVpn.setForeground(false);
-    _backgroundedAt ??= ref.read(schoolSessionClockProvider)();
-  }
+  void _recordBackgroundTime() =>
+      _backgroundedAt ??= ref.read(schoolSessionClockProvider)();
 
   bool get _isForeground =>
       mounted &&

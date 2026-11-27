@@ -16,8 +16,6 @@ import 'package:neuq_one/app/login_page.dart';
 import 'package:neuq_one/app/router.dart';
 import 'package:neuq_one/core/auth/school_auth.dart';
 import 'package:neuq_one/core/database/school_data.dart';
-import 'package:neuq_one/core/network/campus_access/campus_access_providers.dart';
-import 'package:neuq_one/core/network/campus_access/webvpn_session_manager.dart';
 import 'package:neuq_one/core/storage/settings.dart';
 import 'package:neuq_one/core/network/public_data_client.dart';
 import 'package:neuq_one/core/time/campus_clock.dart';
@@ -37,7 +35,6 @@ import 'package:neuq_one/features/services/domain/school_policy.dart';
 import 'package:neuq_one/features/services/presentation/campus_map_page.dart';
 import 'package:neuq_one/features/services/presentation/classrooms_page.dart';
 import 'package:neuq_one/features/services/presentation/employment_page.dart';
-import 'package:neuq_one/features/services/presentation/services_page.dart';
 import 'package:neuq_one/features/timetable/data/local_timetable.dart';
 import 'package:neuq_one/features/timetable/domain/timetable.dart';
 import 'package:neuq_one/features/timetable/presentation/timetable_date.dart';
@@ -47,34 +44,6 @@ import 'package:neuq_one/features/timetable/presentation/week_timetable.dart';
 import 'fixtures/classroom_week.dart';
 
 void main() {
-  final unusedVpn = _UnusedWebVpn();
-  _appTest(
-    'startup, public classroom data and foreground resume leave WebVPN untouched',
-    (tester) async {
-      expect(unusedVpn.attempts, 0);
-      await _tab(tester, '服务');
-      final services = find.descendant(
-        of: find.byType(ServicesPage),
-        matching: find.byType(Scrollable),
-      );
-      await tester.scrollUntilVisible(
-        find.text('校外远程资源访问系统'),
-        240,
-        scrollable: services,
-      );
-      expect(find.text('校外远程资源访问系统'), findsOneWidget);
-      _router(tester).push<void>('/services/classrooms');
-      await tester.pumpAndSettle();
-      expect(find.byType(ClassroomsPage), findsOneWidget);
-      _resume(tester);
-      await tester.pumpAndSettle();
-      expect(unusedVpn.attempts, 0);
-    },
-    vpnProtocol: unusedVpn,
-    classroomResponse: () =>
-        http.Response.bytes(utf8.encode(classroomWeekBody()), 200),
-  );
-
   final sampleTerm = Semester(
     id: 'fixture',
     name: '测试学期',
@@ -165,7 +134,6 @@ void main() {
 
       final credentials = find.text('删除本地保存的学号与密码');
       await tester.ensureVisible(credentials);
-      await tester.pumpAndSettle();
       expect(
         tester.getTopLeft(credentials).dy,
         greaterThan(tester.getTopLeft(find.text('数据管理')).dy),
@@ -1187,7 +1155,6 @@ void _appTest(
   DateTime Function()? classroomClock,
   DateTime Function()? timetableClock,
   DateTime Function()? schoolSessionClock,
-  WebVpnProtocol? vpnProtocol,
   List<SchoolPolicy>? schoolPolicies,
   Future<Uint8List> Function(SchoolPolicy)? schoolPolicyPdf,
   SchoolPolicySaver? schoolPolicySaver,
@@ -1216,12 +1183,6 @@ void _appTest(
         ProviderScope(
           overrides: [
             schoolAuthRepositoryProvider.overrideWithValue(auth),
-            if (vpnProtocol != null) ...[
-              webVpnProtocolProvider.overrideWithValue(vpnProtocol),
-              campusAccessSettingsProvider.overrideWith(
-                _WidgetCampusSettings.new,
-              ),
-            ],
             if (schoolSessionClock != null)
               schoolSessionClockProvider.overrideWithValue(schoolSessionClock),
             if (onRefresh != null)
@@ -1292,21 +1253,6 @@ void _appTest(
       unawaited(grades.changes.close());
     }
   });
-}
-
-class _UnusedWebVpn implements WebVpnProtocol {
-  int attempts = 0;
-
-  @override
-  Future<WebVpnSession> authenticate(WebVpnAuthentication attempt) async {
-    attempts++;
-    throw StateError('An unrelated app action attempted VPN authentication');
-  }
-}
-
-class _WidgetCampusSettings extends CampusAccessSettingsController {
-  @override
-  Future<CampusAccessSettings> build() async => const CampusAccessSettings();
 }
 
 class _TestCampusCardRepository extends CampusCardRepository {
