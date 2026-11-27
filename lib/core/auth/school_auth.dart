@@ -162,12 +162,17 @@ class _NeuqAuthRepository implements SchoolAuthRepository {
   });
 }
 
+class SchoolPasswordConsentRequired implements Exception {
+  const SchoolPasswordConsentRequired();
+}
+
 class _SchoolLoginStore {
-  const _SchoolLoginStore(this._storage);
+  _SchoolLoginStore(this._storage);
 
   static const _legacyIdentityKey = 'verifiedNeuqStudent';
   static const _accountKey = 'neuqSchoolLogin';
   final FlutterSecureStorage _storage;
+  Future<void> _writes = Future.value();
 
   Future<Map<String, dynamic>?> _record() async {
     final raw = await _storage.read(key: _accountKey);
@@ -193,8 +198,19 @@ class _SchoolLoginStore {
     return subject is String && isStoredSchoolSubject(subject) ? subject : null;
   }
 
-  Future<NeuqCredentials?> credentialsFor(String subject) async {
+  Future<NeuqCredentials?> credentialsFor(
+    String subject, {
+    bool forWebVpn = false,
+  }) async {
     final value = await _record();
+    final credentials = _credentials(value, subject);
+    if (forWebVpn && credentials != null && value?['allowWebVpn'] != true) {
+      throw const SchoolPasswordConsentRequired();
+    }
+    return credentials;
+  }
+
+  NeuqCredentials? _credentials(Map<String, dynamic>? value, String subject) {
     if (value == null || value['subject'] != subject) return null;
     final username = value['username'];
     final password = value['password'];
@@ -207,6 +223,9 @@ class _SchoolLoginStore {
   }
 
   Future<void> save(String subject, NeuqCredentials? credentials) =>
+      _write(() => _save(subject, credentials));
+
+  Future<void> _save(String subject, NeuqCredentials? credentials) =>
       _storage.write(
         key: _accountKey,
         value: jsonEncode({
@@ -214,24 +233,42 @@ class _SchoolLoginStore {
           if (credentials != null) ...{
             'username': credentials.username,
             'password': credentials.password,
+            'allowWebVpn': true,
           },
         }),
       );
 
-  Future<void> forget(String subject) async {
+  Future<bool> allowWebVpn(String subject) async {
+    var granted = false;
+    await _write(() async {
+      final credentials = _credentials(await _record(), subject);
+      if (credentials == null) return;
+      await _save(subject, credentials);
+      granted = true;
+    });
+    return granted;
+  }
+
+  Future<void> forget(String subject) => _write(() async {
     final value = await _record();
     if (value == null || value['subject'] != subject) return;
     if (value.containsKey('username') || value.containsKey('password')) {
-      await save(subject, null);
+      await _save(subject, null);
     }
-  }
+  });
 
-  Future<void> clear() async {
+  Future<void> clear() => _write(() async {
     try {
       await _storage.delete(key: _legacyIdentityKey);
     } finally {
       await _storage.delete(key: _accountKey);
     }
+  });
+
+  Future<void> _write(Future<void> Function() write) {
+    final result = _writes.then((_) => write());
+    _writes = result.then<void>((_) {}, onError: (Object _) {});
+    return result;
   }
 }
 
@@ -240,11 +277,13 @@ final _schoolLoginStoreProvider = Provider(
 );
 
 final schoolRememberedCredentialsProvider =
-    Provider<Future<NeuqCredentials?> Function(String)>((ref) {
+    Provider<Future<NeuqCredentials?> Function(String, {bool forWebVpn})>((
+      ref,
+    ) {
       final store = ref.watch(_schoolLoginStoreProvider);
-      return (subject) =>
+      return (subject, {forWebVpn = false}) =>
           !kIsWeb && defaultTargetPlatform == TargetPlatform.android
-          ? store.credentialsFor(subject)
+          ? store.credentialsFor(subject, forWebVpn: forWebVpn)
           : Future.value();
     });
 
@@ -276,8 +315,18 @@ final Provider<NeuqClient> neuqClientProvider = Provider((ref) {
   final client = NeuqClient(
     readRemembered: ref.watch(schoolRememberedCredentialsProvider),
     forgetRemembered: (subject) async {
-      await store.forget(subject);
-      if (ref.mounted) ref.invalidate(rememberedSchoolPasswordProvider);
+      if (!ref.mounted) return;
+      final boundary = ref.read(schoolNetworkBoundaryProvider.notifier);
+      final ownsDeletion = !ref
+          .read(schoolNetworkBoundaryProvider)
+          .deletingPassword;
+      if (ownsDeletion) boundary.deletingPassword(true);
+      try {
+        await store.forget(subject);
+        if (ref.mounted) ref.invalidate(rememberedSchoolPasswordProvider);
+      } finally {
+        if (ref.mounted && ownsDeletion) boundary.deletingPassword(false);
+      }
     },
     createClient: ref.watch(neuqHttpClientFactoryProvider),
     clock: ref.watch(schoolSessionClockProvider),
@@ -430,6 +479,24 @@ class SchoolSessionController extends AsyncNotifier<SchoolSession?> {
     } finally {
       if (ref.mounted) boundary.deletingPassword(false);
     }
+  }
+
+  Future<bool> allowRememberedPasswordForWebVpn(String subject) async {
+    if (state.asData?.value?.subject != subject ||
+        _disconnecting ||
+        _signingIn ||
+        ref.read(schoolNetworkBoundaryProvider).deletingPassword ||
+        !ref.read(schoolAuthRepositoryProvider).canRememberPassword) {
+      return false;
+    }
+    final revision = _revision;
+    final granted = await ref
+        .read(_schoolLoginStoreProvider)
+        .allowWebVpn(subject);
+    return granted &&
+        ref.mounted &&
+        revision == _revision &&
+        !ref.read(schoolNetworkBoundaryProvider).deletingPassword;
   }
 }
 

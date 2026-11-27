@@ -2,11 +2,14 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:material_ui/material_ui.dart';
+import 'package:neuq_one/core/auth/neuq_login_protocol.dart';
 import 'package:neuq_one/core/auth/school_auth.dart';
 import 'package:neuq_one/core/diagnostics/diagnostics.dart';
 import 'package:neuq_one/core/network/campus_access/campus_access_client.dart';
@@ -16,6 +19,7 @@ import 'package:neuq_one/core/network/campus_access/campus_transport.dart';
 import 'package:neuq_one/core/network/campus_access/webvpn_session_manager.dart';
 import 'package:neuq_one/core/storage/settings.dart';
 import 'package:neuq_one/features/profile/presentation/webvpn_settings_page.dart';
+import 'package:neuq_one/features/services/presentation/campus_resource_panel.dart';
 
 const _academic = CampusResourceId.academic;
 const _guide = CampusResourceId.webVpnGuide;
@@ -62,6 +66,8 @@ CampusResource _resource({
 );
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+
   test(
     'direct success and direct-only public requests do not authenticate',
     () async {
@@ -127,6 +133,118 @@ void main() {
   });
 
   test(
+    'automatic VPN path is per resource and expires despite cache hits',
+    () async {
+      final fixture = _Fixture();
+      addTearDown(fixture.dispose);
+      final access = fixture.client(_resource(), second: _resource());
+      fixture.direct = (_) async => throw const SocketException('no route');
+      expect((await access.read(_academic)).route, CampusAccessRoute.webVpn);
+      fixture.direct = (_) async => http.Response('direct', 200);
+      expect((await access.read(_guide)).route, CampusAccessRoute.direct);
+
+      fixture.advance(const Duration(minutes: 4));
+      expect((await access.read(_academic)).route, CampusAccessRoute.webVpn);
+      expect(fixture.directRequests, 2);
+      expect(fixture.protocol.attempts, 1);
+      fixture.advance(const Duration(minutes: 1));
+      expect((await access.read(_academic)).route, CampusAccessRoute.direct);
+      expect(fixture.directRequests, 3);
+    },
+  );
+
+  test(
+    'network changes, user preference and VPN failure reassess the cached path',
+    () async {
+      final fixture = _Fixture();
+      addTearDown(fixture.dispose);
+      String? network = 'wifi';
+      final access = fixture.client(
+        _resource(),
+        networkSignature: () async => network,
+      );
+      fixture.direct = (_) async => throw const SocketException('no route');
+      expect((await access.read(_academic)).route, CampusAccessRoute.webVpn);
+
+      fixture.preference = CampusAccessPreference.directOnly;
+      await expectLater(
+        access.read(_academic),
+        throwsA(CampusAccessFailure.unreachable),
+      );
+      expect(fixture.vpnRequests, 1);
+      fixture.preference = CampusAccessPreference.automatic;
+      fixture.direct = (_) async => http.Response('direct', 200);
+      fixture.vpn = (_) async => throw const SocketException('no route');
+      expect((await access.read(_academic)).route, CampusAccessRoute.direct);
+      expect(fixture.vpnRequests, 2);
+
+      fixture.vpn = (_) async => http.Response('vpn', 200);
+      fixture.direct = (_) async => throw const SocketException('no route');
+      expect((await access.read(_academic)).route, CampusAccessRoute.webVpn);
+      network = 'mobile';
+      fixture.direct = (_) async => http.Response('direct', 200);
+      expect((await access.read(_academic)).route, CampusAccessRoute.direct);
+
+      network = null;
+      fixture.direct = (_) async => throw const SocketException('no route');
+      expect((await access.read(_academic)).route, CampusAccessRoute.webVpn);
+      fixture.direct = (_) async => http.Response('direct', 200);
+      expect((await access.read(_academic)).route, CampusAccessRoute.direct);
+    },
+  );
+
+  test('a failed preferred read discards the cached path without replaying a denial', () async {
+    final fixture = _Fixture();
+    addTearDown(fixture.dispose);
+    final access = fixture.access;
+    fixture.direct = (_) async => throw const SocketException('no route');
+    await access.read(_academic);
+    fixture.vpn = (_) async => http.Response('denied', 403);
+    fixture.direct = (_) async => http.Response('direct', 200);
+    await expectLater(
+      access.read(_academic),
+      throwsA(CampusAccessFailure.unauthorized),
+    );
+    expect(fixture.directRequests, 1);
+    expect((await access.read(_academic)).route, CampusAccessRoute.direct);
+  });
+
+  test('background cancels direct work and foreground checks the network without VPN authentication', () async {
+    final fixture = _Fixture();
+    addTearDown(fixture.dispose);
+    var checks = 0;
+    final access = fixture.client(
+      _resource(),
+      networkSignature: () async => 'network-${++checks}',
+    );
+    final started = Completer<void>();
+    final response = Completer<http.Response>();
+    fixture.direct = (_) {
+      started.complete();
+      return response.future;
+    };
+    final pending = access.read(_academic);
+    await started.future;
+    access.setForeground(true);
+    await access.refreshNetwork();
+    final cancelled = expectLater(
+      pending,
+      throwsA(CampusAccessFailure.cancelled),
+    );
+    access.setForeground(false);
+    await cancelled;
+    await expectLater(
+      access.read(_academic),
+      throwsA(CampusAccessFailure.cancelled),
+    );
+    response.complete(http.Response('late', 200));
+    access.setForeground(true);
+    await access.refreshNetwork();
+    expect(checks, 3);
+    expect(fixture.protocol.attempts, 0);
+  });
+
+  test(
     'an identity change invalidates direct results and cancels in-flight reads',
     () async {
       final fixture = _Fixture();
@@ -177,6 +295,34 @@ void main() {
         await expectLater(access.read(_academic), throwsA(failure));
       }
       expect(fixture.directRequests, 5);
+      expect(fixture.protocol.attempts, 0);
+    },
+  );
+
+  test(
+    'response body interruption after headers never triggers VPN fallback',
+    () async {
+      final fixture = _Fixture();
+      addTearDown(fixture.dispose);
+      final direct = MockClient.streaming(
+        (_, _) async => http.StreamedResponse(
+          Stream<List<int>>.error(
+            const SocketException('fixture body interrupted'),
+          ),
+          200,
+        ),
+      );
+      addTearDown(direct.close);
+      final access = CampusAccessClient(
+        resources: {_academic: _resource()},
+        direct: DirectTransport(direct),
+        webVpn: fixture.manager,
+        preference: () => CampusAccessPreference.automatic,
+      );
+      await expectLater(
+        access.read(_academic),
+        throwsA(CampusAccessFailure.responseInterrupted),
+      );
       expect(fixture.protocol.attempts, 0);
     },
   );
@@ -420,6 +566,19 @@ void main() {
         );
       }
       expect(fixture.protocol.attempts, 2);
+      fixture.manager.allowReconnect(
+        expectedFailure: CampusAccessFailure.timeout,
+      );
+      await expectLater(
+        access.read(_academic),
+        throwsA(CampusAccessFailure.vpnDisplaced),
+      );
+      fixture.manager.allowReconnect(
+        expectedFailure: CampusAccessFailure.vpnDisplaced,
+      );
+      fixture.vpn = (_) async => http.Response('vpn', 200);
+      expect((await access.read(_academic)).route, CampusAccessRoute.webVpn);
+      expect(fixture.protocol.attempts, 3);
     },
   );
 
@@ -458,6 +617,35 @@ void main() {
     expect((await access.read(_academic)).route, CampusAccessRoute.webVpn);
     expect(fixture.credentialReads, 1);
   });
+
+  test(
+    'password rejection backs off without blocking a different account',
+    () async {
+      final fixture = _Fixture();
+      addTearDown(fixture.dispose);
+      final access = fixture.client(
+        _resource(policy: CampusResourcePolicy.vpnOnly),
+      );
+      fixture.protocol.before = (_) async =>
+          throw CampusAccessFailure.invalidCredentials;
+      await expectLater(
+        access.read(_academic),
+        throwsA(CampusAccessFailure.invalidCredentials),
+      );
+      fixture.protocol.before = null;
+      fixture.manager.allowReconnect(
+        expectedFailure: CampusAccessFailure.invalidCredentials,
+      );
+      await expectLater(
+        access.read(_academic),
+        throwsA(CampusAccessFailure.invalidCredentials),
+      );
+      expect(fixture.protocol.attempts, 1);
+      fixture.manager.setAccount('second-synthetic-subject');
+      expect((await access.read(_academic)).route, CampusAccessRoute.webVpn);
+      expect(fixture.protocol.attempts, 2);
+    },
+  );
 
   test('new authentication cannot inherit an unverified account', () async {
     final fixture = _Fixture();
@@ -714,6 +902,169 @@ void main() {
       expect(find.text('立即释放'), findsOneWidget);
     },
   );
+
+  test('Android legacy passwords require fresh WebVPN consent and deletion erases it', () async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.android;
+    addTearDown(() => debugDefaultTargetPlatformOverride = null);
+    const username = '00000001';
+    final subject = schoolSubjectForStudentCode(username)!;
+    FlutterSecureStorage.setMockInitialValues({
+      'neuqSchoolLogin': jsonEncode({
+        'subject': subject,
+        'username': username,
+        'password': 'synthetic-password',
+      }),
+    });
+    final scope = ProviderContainer.test();
+    expect((await scope.read(schoolSessionProvider.future))?.subject, subject);
+    final read = scope.read(schoolRememberedCredentialsProvider);
+    expect((await read(subject))?.username, username);
+    await expectLater(
+      read(subject, forWebVpn: true),
+      throwsA(isA<SchoolPasswordConsentRequired>()),
+    );
+    final controller = scope.read(schoolSessionProvider.notifier);
+    expect(await controller.allowRememberedPasswordForWebVpn('other'), isFalse);
+    expect(await controller.allowRememberedPasswordForWebVpn(subject), isTrue);
+    expect((await read(subject, forWebVpn: true))?.username, username);
+    expect(await controller.forgetPassword(), isTrue);
+    expect(await read(subject, forWebVpn: true), isNull);
+    expect(await controller.allowRememberedPasswordForWebVpn(subject), isFalse);
+    expect(scope.read(schoolSessionProvider).value?.subject, subject);
+  });
+
+  test(
+    'password removal cancels an in-flight credential-dependent VPN login',
+    () async {
+      final fixture = _Fixture();
+      addTearDown(fixture.dispose);
+      final auth = _SchoolAuth();
+      final lookupStarted = Completer<void>();
+      final lookup = Completer<NeuqCredentials?>();
+      var lookups = 0;
+      final scope = ProviderContainer.test(
+        overrides: [
+          schoolAuthRepositoryProvider.overrideWithValue(auth),
+          campusAccessSettingsProvider.overrideWith(_TestSettings.new),
+          schoolRememberedCredentialsProvider.overrideWithValue((
+            _, {
+            forWebVpn = false,
+          }) {
+            expect(forWebVpn, isTrue);
+            if (++lookups == 1) lookupStarted.complete();
+            return auth.deleted ? Future.value() : lookup.future;
+          }),
+          webVpnProtocolProvider.overrideWithValue(fixture.protocol),
+          campusResourcesProvider.overrideWithValue({
+            _academic: _resource(policy: CampusResourcePolicy.vpnOnly),
+          }),
+        ],
+      );
+      await scope.read(schoolSessionProvider.future);
+      final access = scope.read(campusAccessClientProvider);
+      fixture.protocol.before = (attempt) async {
+        if (await attempt.readRemembered() == null) {
+          throw CampusAccessFailure.credentialsRequired;
+        }
+        fail('a deleted credential reached the adapter');
+      };
+      final pending = access.read(_academic);
+      await lookupStarted.future;
+      final cancelled = expectLater(
+        pending,
+        throwsA(CampusAccessFailure.cancelled),
+      );
+      expect(
+        await scope.read(schoolSessionProvider.notifier).forgetPassword(),
+        isTrue,
+      );
+      lookup.complete(const NeuqCredentials('00000001', 'synthetic-password'));
+      await cancelled;
+      await expectLater(
+        access.read(_academic),
+        throwsA(CampusAccessFailure.credentialsRequired),
+      );
+      expect(lookups, 2);
+      expect(fixture.vpnRequests, 0);
+      expect(scope.read(schoolSessionProvider).value?.subject, _subject);
+    },
+  );
+
+  testWidgets(
+    'verification is deduplicated and browser return keeps native state unchanged',
+    (tester) async {
+      final fixture = _Fixture();
+      addTearDown(fixture.dispose);
+      fixture.protocol.before = (_) async =>
+          throw CampusAccessFailure.credentialsRequired;
+      final browser = <String>[];
+      final target = Uri.https(officialWebVpnHost, '$_vpnPath/browser');
+      final resource = CampusResource(
+        direct: _resource().direct,
+        policy: CampusResourcePolicy.vpnOnly,
+        allowsWebVpn: true,
+        webVpn: _resource().webVpn,
+        webVpnBrowser: CampusEndpoint(entry: target, scope: _vpnScope),
+      );
+      final scope = ProviderContainer.test(
+        overrides: [
+          schoolAuthRepositoryProvider.overrideWithValue(_SchoolAuth()),
+          campusAccessSettingsProvider.overrideWith(_TestSettings.new),
+          webVpnProtocolProvider.overrideWithValue(fixture.protocol),
+          campusResourcesProvider.overrideWithValue({
+            _academic: resource,
+            _guide: resource,
+          }),
+          campusVerificationBrowserProvider.overrideWithValue(
+            (_, url) async => browser.add(url),
+          ),
+        ],
+      );
+      scope.read(schoolSessionProvider.future).ignore();
+      await tester.pump();
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: scope,
+          child: MaterialApp(
+            home: Scaffold(
+              body: ListView(
+                children: [
+                  CampusResourcePanel(
+                    id: _academic,
+                    builder: (_) => const Text('数据'),
+                  ),
+                  CampusResourcePanel(
+                    id: _guide,
+                    builder: (_) => const Text('数据'),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('需要学校身份验证'), findsOneWidget);
+      await tester.tap(find.text('取消'));
+      await tester.pumpAndSettle();
+      expect(find.text('需要学校身份验证'), findsNothing);
+      expect(browser, isEmpty);
+      await tester.tap(find.text('前往验证').first);
+      await tester.pumpAndSettle();
+      final dialog = find.byType(AlertDialog);
+      await tester.tap(
+        find.descendant(of: dialog, matching: find.text('前往验证')),
+      );
+      await tester.pumpAndSettle();
+      expect(browser, [target.toString()]);
+      final manager = scope.read(webVpnSessionManagerProvider);
+      manager.setForeground(false);
+      manager.setForeground(true);
+      await tester.pumpAndSettle();
+      expect(manager.state.phase, WebVpnPhase.verificationRequired);
+      expect(fixture.protocol.attempts, 1);
+    },
+  );
 }
 
 class _Fixture {
@@ -815,6 +1166,7 @@ class _CountedClient extends MockClient {
 
 class _SchoolAuth implements SchoolAuthRepository {
   String subject = _subject;
+  bool deleted = false;
   final logout = Completer<void>();
   @override
   bool get available => true;
@@ -838,7 +1190,7 @@ class _SchoolAuth implements SchoolAuthRepository {
   @override
   Future<bool> hasRememberedPassword(String subject) async => false;
   @override
-  Future<void> forgetPassword(String subject) async {}
+  Future<void> forgetPassword(String subject) async => deleted = true;
   @override
   Future<void> disconnect() => logout.future;
 }

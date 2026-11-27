@@ -44,6 +44,7 @@ Future<CampusResponse> readCampusEndpoint(
   final unlisten = request.listen(() {
     if (!abort.isCompleted) abort.complete();
   });
+  var receivedHeaders = false;
   try {
     return await request.untilCancelled(
       _read(
@@ -54,14 +55,21 @@ Future<CampusResponse> readCampusEndpoint(
         probe: probe,
         viaWebVpn: viaWebVpn,
         authenticatedResource: authenticatedResource,
-        onHeaders: onHeaders,
+        onHeaders: (status) {
+          receivedHeaders = true;
+          onHeaders(status);
+        },
       ).timeout(timeout),
     );
   } on CampusAccessFailure {
     rethrow;
   } catch (error) {
     cancellation.check();
-    throw classifyCampusError(error);
+    final failure = classifyCampusError(error);
+    if (receivedHeaders && failure.isReachabilityFailure) {
+      throw CampusAccessFailure.responseInterrupted;
+    }
+    throw failure;
   } finally {
     unbind();
     request.cancel();

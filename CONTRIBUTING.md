@@ -25,6 +25,8 @@ flutter test
 
 涉及 Android 通知时，使用 `verify_notifications.py` 检查 APK 内实际打包的图标和合并 Manifest，并分别记录 Android 13+ 通知授权、精确闹钟授权、非精确模式、重启和覆盖安装的设备验收结果。[Android 签名与 APK 检查](docs/android-signing.md)
 
+校园访问回归使用 `flutter test test/campus_access_test.dart test/neuq_webvpn_protocol_test.dart test/neuq_client_test.dart`。模拟服务覆盖选路、CAS 表单、会话隔离和浏览器交互。原生启用需要单独记录获授权的学校环境验收结果。[Android 真机验收](docs/campus-access.md#android-真机验收)
+
 ## 资源与依赖
 
 原始图标位于 `assets/branding/app_icon.png`。Android 自适应图标使用额外内边距抵消系统裁切，修改图标时保留原图留白；iOS 图标须使用无 alpha 通道的 PNG。

@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http/http.dart' as http;
 
@@ -70,7 +71,11 @@ final webVpnSessionManagerProvider = Provider<WebVpnSessionManager>((ref) {
           ref.read(subjectProvider) != subject) {
         return null;
       }
-      return readRemembered(subject);
+      try {
+        return await readRemembered(subject, forWebVpn: true);
+      } on SchoolPasswordConsentRequired {
+        throw CampusAccessFailure.credentialConsentRequired;
+      }
     },
     onState: (state) {
       if (ref.mounted) ref.read(webVpnStateProvider.notifier).update(state);
@@ -109,21 +114,36 @@ final webVpnSessionManagerProvider = Provider<WebVpnSessionManager>((ref) {
 
 final campusAccessClientProvider = Provider<CampusAccessClient>((ref) {
   final http = ref.watch(campusAccessHttpFactoryProvider)();
+  final webVpn = ref.watch(webVpnSessionManagerProvider);
+  final resources = ref.watch(campusResourcesProvider);
+  final canSwitchRoutes =
+      webVpn.protocolAvailable &&
+      resources.values.any(
+        (resource) =>
+            resource.policy == CampusResourcePolicy.preferDirect &&
+            resource.allowsWebVpn &&
+            resource.webVpn != null,
+      );
   ref.onDispose(http.close);
   return CampusAccessClient(
-    resources: ref.watch(campusResourcesProvider),
+    resources: resources,
     direct: DirectTransport(http),
-    webVpn: ref.watch(webVpnSessionManagerProvider),
+    webVpn: webVpn,
     clock: ref.watch(campusAccessClockProvider),
     preference: () =>
         ref.read(campusAccessSettingsProvider).value?.preference ??
         CampusAccessPreference.automatic,
-    networkSignature: _networkSignature,
+    networkSignature: canSwitchRoutes ? _networkSignature : null,
   );
 });
 
 Future<String?> _networkSignature() async {
   try {
+    if (Platform.isAndroid) {
+      return await const MethodChannel('org.neuqone.neuq_one/campus_network')
+          .invokeMethod<String>('activeNetwork')
+          .timeout(const Duration(milliseconds: 250));
+    }
     final interfaces = await NetworkInterface.list().timeout(
       const Duration(milliseconds: 250),
     );

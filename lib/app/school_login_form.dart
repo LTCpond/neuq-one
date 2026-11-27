@@ -113,7 +113,7 @@ class _SchoolLoginFormState extends State<SchoolLoginForm> {
                   : (value) =>
                         setState(() => _rememberPassword = value ?? false),
               title: const Text('在此设备记住密码'),
-              subtitle: const Text('加密存在本机，学校统一认证会话过期时用于重新登录。'),
+              subtitle: const Text('加密保存在本机，用于教务续登及学校远程访问服务按需认证。'),
             ),
           const SizedBox(height: 16),
           if (_submitting) const LinearProgressIndicator(),

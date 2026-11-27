@@ -24,12 +24,17 @@ enum CampusAccessFailure implements Exception {
   unreachable('无法连接校园服务，请检查网络后重试。'),
   dns('无法解析校园服务地址，请检查网络后重试。'),
   timeout('校园服务请求超时，请稍后重试。'),
+  responseInterrupted('校园服务响应中断，请稍后重试。'),
   businessSessionExpired('校园业务登录已过期，请重新登录该服务。'),
   vpnSessionExpired('WebVPN 会话已过期，请按需重新连接。'),
   vpnDisplaced('WebVPN 会话可能已被其他终端断开，请确认后重新连接。'),
   unauthorized('学校未授权访问此资源。'),
   credentialsRequired('请在学校官方 WebVPN 门户登录。'),
   authenticationRejected('学校拒绝了 WebVPN 登录，请在官方门户确认账号状态。'),
+  invalidCredentials('学校账号或密码有误，请在学校官方入口确认。'),
+  credentialConsentRequired('请确认是否允许保存的学校密码用于按需认证。'),
+  deviceVerificationRequired('请在学校官方入口完成设备验证。'),
+  captchaRequired('请在学校官方入口完成验证码。'),
   verificationRequired('请在学校官方 WebVPN 门户完成额外验证。'),
   accountMismatch('WebVPN 会话与当前学校账号不匹配。'),
   rateLimited('学校暂时限制了请求，请稍后重试。'),
@@ -45,6 +50,16 @@ enum CampusAccessFailure implements Exception {
 
   bool get isReachabilityFailure =>
       this == unreachable || this == dns || this == timeout;
+
+  bool get requiresSchoolVerification => switch (this) {
+    credentialsRequired ||
+    authenticationRejected ||
+    invalidCredentials ||
+    deviceVerificationRequired ||
+    captchaRequired ||
+    verificationRequired => true,
+    _ => false,
+  };
 }
 
 class CampusAccessLimits {
@@ -109,6 +124,7 @@ class CampusResource {
     this.requiresAuthentication = false,
     this.allowsWebVpn = false,
     this.webVpn,
+    this.webVpnBrowser,
     this.allowVpnRecovery = true,
     this.timeout = CampusAccessLimits.request,
   });
@@ -120,6 +136,9 @@ class CampusResource {
 
   /// An exact authorized resource entry obtained from the school portal.
   final CampusEndpoint? webVpn;
+
+  /// Optional school-published browser destination for this specific resource.
+  final CampusEndpoint? webVpnBrowser;
   final bool allowVpnRecovery;
   final Duration timeout;
 }

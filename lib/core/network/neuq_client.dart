@@ -7,8 +7,8 @@ import 'dart:typed_data';
 import 'package:html/dom.dart';
 import 'package:html/parser.dart' as html;
 import 'package:http/http.dart' as http;
-import 'package:pointycastle/export.dart';
 
+import '../auth/neuq_cas_form.dart';
 import '../auth/neuq_login_protocol.dart';
 import '../diagnostics/diagnostics.dart';
 
@@ -642,11 +642,9 @@ class NeuqSession {
     }
     final page = html.parse(entry.body);
     _checkChallenge(page);
-    final forms = page.querySelectorAll('form#casLoginForm');
-    if (forms.length != 1) throw SchoolRequestFailure.unsupportedLogin;
-    final form = forms.single;
-    final target = _resolveFrom(entry.uri, form.attributes['action']);
-    if (target == null || form.attributes['method']?.toLowerCase() != 'post') {
+    final form = SchoolCasPasswordForm.parse(page);
+    final target = _resolveFrom(entry.uri, form?.action);
+    if (target == null || form == null) {
       throw SchoolRequestFailure.unsupportedLogin;
     }
     if (!isAcademicCasLogin(target) ||
@@ -657,34 +655,10 @@ class NeuqSession {
                 entry.uri.queryParameters['service']) {
       throw SchoolRequestFailure.unsupportedLogin;
     }
-    String? field(String name) =>
-        form.querySelector('input[name="$name"]')?.attributes['value'];
-    final salt = utf8.encode(
-      form.querySelector('#pwdDefaultEncryptSalt')?.attributes['value'] ?? '',
-    );
-    final lt = field('lt');
-    final execution = field('execution');
-    if (salt.length != 16 ||
-        lt == null ||
-        lt.isEmpty ||
-        execution == null ||
-        execution.isEmpty ||
-        form.querySelector('[name="username"]') == null ||
-        form.querySelector('[name="password"]') == null) {
-      throw SchoolRequestFailure.unsupportedLogin;
-    }
     checkActive();
     final result = await _navigate(
       target,
-      form: {
-        'username': credentials.username,
-        'password': _encodePassword(credentials.password, salt),
-        'lt': lt,
-        'execution': execution,
-        '_eventId': field('_eventId') ?? 'submit',
-        'dllt': field('dllt') ?? 'userNamePasswordLogin',
-        'rmShown': field('rmShown') ?? '1',
-      },
+      form: form.fields(credentials.username, credentials.password),
       referer: entry.uri,
       checkActive: checkActive,
     );
@@ -692,10 +666,7 @@ class NeuqSession {
     if (isAcademicCasLogin(result.uri)) {
       final returned = html.parse(result.body);
       _checkChallenge(returned);
-      if (RegExp(
-        r'密码(?:不正确|错误)|账号或密码|用户名或密码|无效的凭据|invalid credentials',
-        caseSensitive: false,
-      ).hasMatch(returned.body?.text ?? '')) {
+      if (schoolCasPasswordRejected(returned)) {
         throw SchoolRequestFailure.invalidCredentials;
       }
       throw SchoolRequestFailure.verificationRequired;
@@ -1010,55 +981,7 @@ bool _isAcademicLogin(Uri uri) =>
     uri.path.toLowerCase().contains('login');
 
 void _checkChallenge(Document page) {
-  if (page.querySelector(
-            'input[name="needCaptcha"][value="true"], input[name="needCaptcha"][value="1"]',
-          ) !=
-          null ||
-      page
-          .querySelectorAll(
-            'input[name="captcha"], input[name="captchaResponse"], input[name="captchaCode"], input[name="otp"], input[name="smsCode"], input[autocomplete="one-time-code"], #captchaImg, [data-sitekey]',
-          )
-          .where((element) => element.attributes['type'] != 'hidden')
-          .any(schoolElementVisible)) {
+  if (schoolCasChallenge(page) != null) {
     throw SchoolRequestFailure.verificationRequired;
-  }
-  final visibleText = page
-      .querySelectorAll('body, body *')
-      .where(
-        (node) =>
-            !const {'script', 'style'}.contains(node.localName) &&
-            schoolElementVisible(node),
-      )
-      .expand((node) => node.nodes.whereType<Text>())
-      .map((node) => node.data)
-      .join(' ');
-  if (RegExp(r'请输入验证码|验证码错误|请完成验证|请拖动滑块|设备校验|双重登录认证|多因素认证')
-      .hasMatch(visibleText)) {
-    throw SchoolRequestFailure.verificationRequired;
-  }
-}
-
-String _encodePassword(String password, List<int> salt) {
-  // This is the CAS form's wire format. HTTPS protects the complete form.
-  const alphabet = 'ABCDEFGHJKMNPQRSTWXYZabcdefhijkmnprstwxyz2345678';
-  final random = Random.secure();
-  int randomCharacter(int _) =>
-      alphabet.codeUnitAt(random.nextInt(alphabet.length));
-  final iv = Uint8List.fromList(List.generate(16, randomCharacter));
-  final prefix = List.generate(64, randomCharacter);
-  final bytes = Uint8List.fromList([...prefix, ...utf8.encode(password)]);
-  try {
-    final cipher =
-        PaddedBlockCipherImpl(PKCS7Padding(), CBCBlockCipher(AESEngine()))
-          ..init(
-            true,
-            PaddedBlockCipherParameters(
-              ParametersWithIV(KeyParameter(Uint8List.fromList(salt)), iv),
-              null,
-            ),
-          );
-    return base64.encode(cipher.process(bytes));
-  } finally {
-    bytes.fillRange(0, bytes.length, 0);
   }
 }

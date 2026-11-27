@@ -55,16 +55,55 @@ class CampusAccessClient {
   final Future<String?> Function()? _networkSignature;
   final DateTime Function() _now;
   final _directReachableUntil = <CampusResourceId, DateTime>{};
+  final _routes =
+      <CampusResourceId, ({CampusAccessRoute route, DateTime until})>{};
   String? _signature;
   int _networkGeneration = 0;
+  Future<void>? _checkingNetwork;
+  CampusCancellation? _foreground = CampusCancellation();
 
   CampusAccessUse openUse() =>
       CampusAccessUse._(this, _webVpn.identity, _webVpn.generation);
+
+  void setForeground(bool foreground) {
+    if (foreground) {
+      _foreground ??= CampusCancellation();
+      refreshNetwork().ignore();
+    } else if (_foreground case final previous?) {
+      _foreground = null;
+      previous.cancel();
+      networkChanged();
+    }
+  }
 
   void networkChanged() {
     _networkGeneration++;
     _signature = null;
     _directReachableUntil.clear();
+    _routes.clear();
+    _checkingNetwork = null;
+  }
+
+  Future<void> refreshNetwork() {
+    final signature = _networkSignature;
+    if (signature == null) return Future.value();
+    return _checkingNetwork ??= _refreshNetwork(signature);
+  }
+
+  Future<void> _refreshNetwork(Future<String?> Function() read) async {
+    final generation = _networkGeneration;
+    String? current;
+    try {
+      current = await Future<String?>.microtask(read);
+    } catch (_) {
+      // With no reliable network identifier, discard observations.
+    }
+    if (generation != _networkGeneration) return;
+    _checkingNetwork = null;
+    if (current == null || current != _signature) {
+      networkChanged();
+      _signature = current;
+    }
   }
 
   /// Returns a scoped official browser entry for a registered direct resource.
@@ -80,6 +119,22 @@ class CampusAccessClient {
     return endpoint.entry;
   }
 
+  Uri? webVpnBrowserEntry(CampusResourceId id) {
+    final resource = _resources[id];
+    if (resource == null ||
+        !resource.allowsWebVpn ||
+        resource.policy == CampusResourcePolicy.directOnly ||
+        _preference() == CampusAccessPreference.directOnly) {
+      return null;
+    }
+    final endpoint = resource.webVpnBrowser;
+    if (endpoint == null) return Uri.parse(officialWebVpnUrl);
+    return endpoint.scope.host == officialWebVpnHost &&
+            endpoint.scope.allows(endpoint.entry)
+        ? endpoint.entry
+        : null;
+  }
+
   /// CampusAccess only accepts fixed, read-only registrations. Write
   /// operations such as payments or reservations belong to their own clients.
   Future<CampusAccessResult> read(
@@ -89,6 +144,8 @@ class CampusAccessClient {
   }) async {
     final resource = _resources[id];
     if (resource == null) throw CampusAccessFailure.unsupported;
+    final foreground = _foreground;
+    if (foreground == null) throw CampusAccessFailure.cancelled;
     if (resource.requiresAuthentication && _webVpn.subject == null) {
       throw CampusAccessFailure.credentialsRequired;
     }
@@ -99,6 +156,7 @@ class CampusAccessClient {
     final call = CampusCancellation();
     final unbindUse = active._cancellation.listen(call.cancel);
     final unbindCall = cancellation?.listen(call.cancel);
+    final unbindForeground = foreground.listen(call.cancel);
     try {
       call.check();
       final choice = _preference();
@@ -108,6 +166,20 @@ class CampusAccessClient {
           choice != CampusAccessPreference.directOnly;
       final vpnReady =
           vpnAllowed && resource.webVpn != null && _webVpn.protocolAvailable;
+      final automatic =
+          choice == CampusAccessPreference.automatic &&
+          resource.policy == CampusResourcePolicy.preferDirect &&
+          vpnReady;
+      if (vpnReady && resource.policy == CampusResourcePolicy.preferDirect) {
+        await call.untilCancelled(refreshNetwork());
+      }
+      final network = _networkGeneration;
+      final canCache =
+          automatic && (_networkSignature == null || _signature != null);
+      final cached = canCache ? _routes[id] : null;
+      final cachedRoute = cached != null && cached.until.isAfter(_now())
+          ? cached.route
+          : null;
 
       Future<CampusResponse> direct(void Function(int) onHeaders) =>
           _readDirect(
@@ -123,23 +195,20 @@ class CampusAccessClient {
         if (active._vpnGeneration != _webVpn.generation) {
           throw CampusAccessFailure.cancelled;
         }
-        WebVpnLease? acquired;
-        try {
-          return await _webVpnTransport.read(
-            resource,
-            call,
-            acquire: () {
-              final previous = active._lease;
-              return acquired = previous != null && !previous.isReleased
-                  ? previous
-                  : active._lease = _webVpn.acquire(active._vpnGeneration);
-            },
-            onHeaders: onHeaders,
-          );
-        } catch (_) {
-          acquired?.release();
-          rethrow;
+        if (_preference() == CampusAccessPreference.directOnly) {
+          throw CampusAccessFailure.preferenceBlocked;
         }
+        return _webVpnTransport.read(
+          resource,
+          call,
+          acquire: () {
+            final previous = active._lease;
+            return previous != null && !previous.isReleased
+                ? previous
+                : active._lease = _webVpn.acquire(active._vpnGeneration);
+          },
+          onHeaders: onHeaders,
+        );
       }
 
       final CampusAccessRoute route;
@@ -152,25 +221,35 @@ class CampusAccessClient {
         response = await _readRoute(id, route, vpn);
       } else {
         final preferVpn =
-            choice == CampusAccessPreference.preferVpn && vpnReady;
+            (choice == CampusAccessPreference.preferVpn && vpnReady) ||
+            cachedRoute == CampusAccessRoute.webVpn;
         final first = preferVpn
             ? CampusAccessRoute.webVpn
             : CampusAccessRoute.direct;
-        final (selected, data) = await _readWithFallback(
-          id,
-          first,
-          preferVpn ? vpn : direct,
-          preferVpn
-              ? direct
-              : vpnAllowed
-              ? vpn
-              : null,
-        );
-        route = selected;
-        response = data;
+        try {
+          (route, response) = await _readWithFallback(
+            id,
+            first,
+            preferVpn ? vpn : direct,
+            preferVpn
+                ? direct
+                : vpnAllowed
+                ? vpn
+                : null,
+          );
+        } on CampusAccessFailure catch (failure) {
+          if (failure != CampusAccessFailure.cancelled &&
+              cached != null &&
+              network == _networkGeneration &&
+              _routes[id] == cached) {
+            _routes.remove(id);
+          }
+          rethrow;
+        }
       }
       call.check();
       void ensureCurrent() {
+        foreground.check();
         active._identity.check();
         use?._cancellation.check();
         cancellation?.check();
@@ -181,10 +260,20 @@ class CampusAccessClient {
       }
 
       ensureCurrent();
+      if (canCache && network == _networkGeneration) {
+        _routes[id] = (
+          route: route,
+          // A hit on the VPN path must not postpone the next direct probe.
+          until: route == CampusAccessRoute.webVpn && cachedRoute == route
+              ? cached!.until
+              : _now().add(CampusAccessLimits.reachability),
+        );
+      }
       return CampusAccessResult(response, route, ensureCurrent);
     } finally {
       unbindUse();
       unbindCall?.call();
+      unbindForeground();
       if (use == null) active.close();
     }
   }
@@ -221,14 +310,8 @@ class CampusAccessClient {
     required bool probe,
     required void Function(int) onHeaders,
   }) async {
-    if (probe && _networkSignature != null) {
-      final signature = await cancellation.untilCancelled(_networkSignature());
-      if (_signature != signature || signature == null) {
-        networkChanged();
-        _signature = signature;
-      }
-    }
     final network = _networkGeneration;
+    final canCache = probe && (_networkSignature == null || _signature != null);
     final reachable = _directReachableUntil[id]?.isAfter(_now()) == true;
     try {
       return await _direct.read(
@@ -236,7 +319,7 @@ class CampusAccessClient {
         cancellation,
         probe: probe && !reachable,
         onHeaders: (status) {
-          if (probe && _networkGeneration == network) {
+          if (canCache && _networkGeneration == network) {
             _directReachableUntil[id] = _now().add(
               CampusAccessLimits.reachability,
             );

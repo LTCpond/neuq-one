@@ -33,13 +33,12 @@ class _NeuqOneAppState extends ConsumerState<NeuqOneApp> {
     super.initState();
     _webVpn = ref.read(webVpnSessionManagerProvider);
     final state = WidgetsBinding.instance.lifecycleState;
-    _webVpn.setForeground(state == null || state == AppLifecycleState.resumed);
+    _setCampusForeground(state == null || state == AppLifecycleState.resumed);
     _lifecycle = AppLifecycleListener(
       onHide: _recordBackgroundTime,
       onPause: _recordBackgroundTime,
       onResume: () {
-        _webVpn.setForeground(true);
-        ref.read(campusAccessClientProvider).networkChanged();
+        _setCampusForeground(true);
         final session = ref.read(schoolSessionProvider).asData?.value;
         final backgroundedAt = _backgroundedAt;
         _backgroundedAt = null;
@@ -54,8 +53,13 @@ class _NeuqOneAppState extends ConsumerState<NeuqOneApp> {
   }
 
   void _recordBackgroundTime() {
-    _webVpn.setForeground(false);
+    _setCampusForeground(false);
     _backgroundedAt ??= ref.read(schoolSessionClockProvider)();
+  }
+
+  void _setCampusForeground(bool foreground) {
+    _webVpn.setForeground(foreground);
+    ref.read(campusAccessClientProvider).setForeground(foreground);
   }
 
   bool get _isForeground =>

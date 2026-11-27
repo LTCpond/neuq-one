@@ -5,6 +5,7 @@ import android.app.Activity
 import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.ConnectivityManager
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
@@ -24,6 +25,17 @@ class MainActivity : FlutterActivity() {
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            "org.neuqone.neuq_one/campus_network"
+        ).setMethodCallHandler { call, result ->
+            if (call.method == "activeNetwork") {
+                val connectivity = getSystemService(ConnectivityManager::class.java)
+                result.success(connectivity?.activeNetwork?.networkHandle?.toString())
+            } else {
+                result.notImplemented()
+            }
+        }
         MethodChannel(
             flutterEngine.dartExecutor.binaryMessenger,
             "org.neuqone.neuq_one/notification_settings"

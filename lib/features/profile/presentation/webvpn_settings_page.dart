@@ -8,6 +8,7 @@ import '../../../core/network/official_browser.dart';
 import '../../../core/storage/settings.dart';
 import '../../../core/time/campus_clock.dart';
 import '../../../core/widgets/screen.dart';
+import '../../services/presentation/open_campus_service.dart';
 
 class WebVpnSettingsPage extends ConsumerStatefulWidget {
   const WebVpnSettingsPage({super.key});
@@ -36,6 +37,11 @@ class _WebVpnSettingsPageState extends ConsumerState<WebVpnSettingsPage> {
     final settings = ref.watch(campusAccessSettingsProvider);
     final manager = ref.watch(webVpnSessionManagerProvider);
     final vpn = ref.watch(webVpnStateProvider);
+    final canDisconnect = const {
+      WebVpnPhase.connecting,
+      WebVpnPhase.connected,
+      WebVpnPhase.idle,
+    }.contains(vpn.phase);
     final pendingRelease = vpn.idleUntil?.toUtc().add(campusOffset);
     final idleLabel = pendingRelease == null
         ? null
@@ -65,14 +71,8 @@ class _WebVpnSettingsPageState extends ConsumerState<WebVpnSettingsPage> {
                   const LinearProgressIndicator(),
                 ListTile(
                   title: const Text('断开应用内 WebVPN'),
-                  onTap:
-                      vpn.phase == WebVpnPhase.disconnected ||
-                          vpn.phase == WebVpnPhase.disconnecting
-                      ? null
-                      : () => manager.disconnect(),
-                  enabled:
-                      vpn.phase != WebVpnPhase.disconnected &&
-                      vpn.phase != WebVpnPhase.disconnecting,
+                  onTap: canDisconnect ? manager.disconnect : null,
+                  enabled: canDisconnect,
                 ),
               ],
             ),
@@ -151,12 +151,10 @@ class _WebVpnSettingsPageState extends ConsumerState<WebVpnSettingsPage> {
                 ListTile(
                   leading: const Icon(Icons.help_outline),
                   title: const Text('学校使用说明'),
-                  onTap: () => openOfficialPage(
+                  onTap: () => openRegisteredCampusWebsite(
                     context,
-                    ref
-                        .read(campusAccessClientProvider)
-                        .directEntry(CampusResourceId.webVpnGuide)
-                        .toString(),
+                    ref,
+                    CampusResourceId.webVpnGuide,
                   ),
                 ),
               ],

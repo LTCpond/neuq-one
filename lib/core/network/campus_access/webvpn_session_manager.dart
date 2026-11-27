@@ -11,10 +11,10 @@ enum WebVpnPhase {
   disconnected('未连接'),
   connecting('正在连接'),
   connected('已连接'),
-  idle('空闲'),
+  idle('会话空闲'),
   disconnecting('正在释放会话'),
   expired('会话已过期'),
-  verificationRequired('需要在官方门户验证'),
+  verificationRequired('需要身份验证'),
   error('连接异常');
 
   const WebVpnPhase(this.label);
@@ -123,6 +123,7 @@ class WebVpnSessionManager {
   CampusCancellation? _logoutCancellation;
   CampusAccessFailure? _blocked;
   DateTime? _rateLimitedUntil;
+  DateTime? _passwordRetryUntil;
   bool _automaticRecoveryUsed = false;
 
   Duration _idleTimeout = const Duration(
@@ -134,6 +135,7 @@ class WebVpnSessionManager {
   void setAccount(String? subject) {
     if (_disposed || _subject == subject) return;
     _subject = subject;
+    _passwordRetryUntil = null;
     _identity.cancel();
     _identity = CampusCancellation();
     disconnect();
@@ -142,7 +144,10 @@ class WebVpnSessionManager {
   void setForeground(bool foreground) {
     if (_disposed || _foreground == foreground) return;
     _foreground = foreground;
-    if (!foreground) _suspendConsumers();
+    if (!foreground) {
+      _suspendConsumers();
+      _logoutCancellation?.cancel();
+    }
     _updateIdle();
   }
 
@@ -154,9 +159,14 @@ class WebVpnSessionManager {
 
   /// Clears a recoverable stop only after an explicit user action.
   /// The next authorized business read decides whether to connect.
-  void allowReconnect() {
+  void allowReconnect({CampusAccessFailure? expectedFailure}) {
     if (_disposed || !_foreground || _blocked == null) return;
-    if (_rateLimitedUntil?.isAfter(_now()) == true) return;
+    if (expectedFailure != null && _blocked != expectedFailure) return;
+    final now = _now();
+    if (_rateLimitedUntil?.isAfter(now) == true ||
+        _passwordRetryUntil?.isAfter(now) == true) {
+      return;
+    }
     _blocked = null;
     _automaticRecoveryUsed = false;
     _publish(WebVpnPhase.disconnected);
@@ -229,10 +239,13 @@ class WebVpnSessionManager {
 
   Future<WebVpnSession> _connect() async {
     if (_disposed || !_foreground) throw CampusAccessFailure.cancelled;
+    if (_blocked case final failure?) throw failure;
     if (_rateLimitedUntil?.isAfter(_now()) == true) {
       throw CampusAccessFailure.rateLimited;
     }
-    if (_blocked case final failure?) throw failure;
+    if (_passwordRetryUntil?.isAfter(_now()) == true) {
+      throw CampusAccessFailure.invalidCredentials;
+    }
     if (_session case final session?) return session;
     if (_connecting case final connecting?) return connecting.result;
 
@@ -260,6 +273,7 @@ class WebVpnSessionManager {
     CampusCancellation cancellation,
     int generation,
   ) async {
+    final watch = Stopwatch()..start();
     try {
       // Wait for an older isolated logout even if a new user has arrived.
       if (_closing case final closing?) {
@@ -307,6 +321,8 @@ class WebVpnSessionManager {
         DiagnosticModule.webVpn,
         DiagnosticStage.signIn,
         level: DiagnosticSeverity.info,
+        elapsedMs: watch.elapsedMilliseconds,
+        code: DiagnosticCode.completed,
       );
       return session;
     } catch (error) {
@@ -321,6 +337,7 @@ class WebVpnSessionManager {
           diagnostics.record(
             DiagnosticModule.webVpn,
             DiagnosticStage.signIn,
+            elapsedMs: watch.elapsedMilliseconds,
             code: campusFailureCode(failure),
           );
         }
@@ -354,6 +371,8 @@ class WebVpnSessionManager {
           CampusAccessFailure.vpnDisplaced ||
           CampusAccessFailure.accountMismatch ||
           CampusAccessFailure.authenticationRejected ||
+          CampusAccessFailure.deviceVerificationRequired ||
+          CampusAccessFailure.captchaRequired ||
           CampusAccessFailure.verificationRequired:
         _session = null;
         session.close();
@@ -368,8 +387,13 @@ class WebVpnSessionManager {
     if (failure == CampusAccessFailure.rateLimited) {
       _rateLimitedUntil = _now().add(CampusAccessLimits.reachability);
     }
+    if (failure == CampusAccessFailure.invalidCredentials) {
+      _passwordRetryUntil = _now().add(CampusAccessLimits.reachability);
+    }
     _publish(switch (failure) {
-      CampusAccessFailure.verificationRequired =>
+      _
+          when failure.requiresSchoolVerification ||
+              failure == CampusAccessFailure.credentialConsentRequired =>
         WebVpnPhase.verificationRequired,
       CampusAccessFailure.vpnSessionExpired ||
       CampusAccessFailure.vpnDisplaced => WebVpnPhase.expired,
@@ -454,7 +478,7 @@ class WebVpnSessionManager {
   }
 
   Future<void> _logout(WebVpnSession session) async {
-    if (_disposed) {
+    if (_disposed || !_foreground) {
       session.close();
       return;
     }
@@ -507,15 +531,20 @@ DiagnosticCode campusFailureCode(CampusAccessFailure failure) =>
       CampusAccessFailure.unreachable => DiagnosticCode.connectionFailed,
       CampusAccessFailure.dns => DiagnosticCode.dnsFailure,
       CampusAccessFailure.timeout => DiagnosticCode.timeout,
+      CampusAccessFailure.responseInterrupted => DiagnosticCode.responseTimeout,
       CampusAccessFailure.businessSessionExpired =>
         DiagnosticCode.sessionExpired,
       CampusAccessFailure.vpnSessionExpired ||
       CampusAccessFailure.vpnDisplaced => DiagnosticCode.vpnExpired,
-      CampusAccessFailure.verificationRequired =>
+      CampusAccessFailure.verificationRequired ||
+      CampusAccessFailure.captchaRequired ||
+      CampusAccessFailure.deviceVerificationRequired ||
+      CampusAccessFailure.credentialConsentRequired =>
         DiagnosticCode.verificationRequired,
       CampusAccessFailure.unauthorized => DiagnosticCode.permissionDenied,
       CampusAccessFailure.accountMismatch ||
       CampusAccessFailure.credentialsRequired ||
+      CampusAccessFailure.invalidCredentials ||
       CampusAccessFailure.authenticationRejected => DiagnosticCode.rejected,
       CampusAccessFailure.rateLimited => DiagnosticCode.rateLimited,
       CampusAccessFailure.server => DiagnosticCode.serverError,
