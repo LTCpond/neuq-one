@@ -12,6 +12,7 @@ class SchoolSyncStatus extends StatelessWidget {
     required this.syncedAt,
     required this.label,
     this.cacheError = false,
+    this.restoring = false,
     this.reconnect,
     this.compactSuccessLabel,
   });
@@ -21,6 +22,7 @@ class SchoolSyncStatus extends StatelessWidget {
   final DateTime? syncedAt;
   final String label;
   final bool cacheError;
+  final bool restoring;
   final Widget? reconnect;
   final String? compactSuccessLabel;
 
@@ -30,15 +32,15 @@ class SchoolSyncStatus extends StatelessWidget {
     final last = time == null
         ? null
         : '${shortDate(time)} ${clockLabel(time.hour * 60 + time.minute)}';
-    final failure = refresh.error;
+    final error = refresh.error;
+    final failure = error is SchoolRequestFailure ? error : null;
     final needsLogin =
-        failure == SchoolRequestFailure.expired ||
-        failure == SchoolRequestFailure.differentAccount ||
-        failure == SchoolRequestFailure.invalidCredentials ||
-        failure == SchoolRequestFailure.verificationRequired ||
-        failure == SchoolRequestFailure.unsupportedLogin;
+        failure?.requiresCredentials == true ||
+        failure?.requiresOfficialLogin == true;
     final status = !available
         ? '$label待接入'
+        : restoring
+        ? '正在自动恢复教务连接'
         : needsLogin
         ? '请重新连接教务${last == null ? '' : ' · 显示 $last 的缓存'}'
         : failure == SchoolRequestFailure.denied
@@ -53,6 +55,7 @@ class SchoolSyncStatus extends StatelessWidget {
     final compact = compactSuccessLabel != null;
     if (compact &&
         available &&
+        !restoring &&
         !refresh.isLoading &&
         !refresh.hasError &&
         !cacheError &&
@@ -72,7 +75,10 @@ class SchoolSyncStatus extends StatelessWidget {
           const SizedBox(width: 7),
         ],
         Expanded(child: Text(status, style: style)),
-        if (needsLogin) ?reconnect,
+        if (needsLogin ||
+            failure == SchoolRequestFailure.unavailable ||
+            failure == SchoolRequestFailure.sessionRejected)
+          ?reconnect,
       ],
     );
   }

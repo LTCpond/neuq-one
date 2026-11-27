@@ -21,6 +21,10 @@ enum DiagnosticModule {
 
 enum DiagnosticStage {
   restore,
+  foregroundRecovery,
+  manualRecovery,
+  academicRecovery,
+  campusCardRecovery,
   signIn,
   renew,
   request,
@@ -54,6 +58,9 @@ enum DiagnosticCode {
   manualCheck,
   checkInterval,
   retryBackoff,
+  recoveryStarted,
+  recoveryJoined,
+  recoveryCancelled,
   stableChannel,
   betaChannel,
   noPublishedRelease,

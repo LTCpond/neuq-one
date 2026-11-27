@@ -35,6 +35,11 @@ class _GradesPageState extends ConsumerState<GradesPage> {
     final refreshKey = schoolRefreshProvider(SchoolDataSet.grades);
     final refresh = ref.watch(refreshKey);
     final sourceReady = ref.watch(schoolDataSourceProvider) != null;
+    final restoring = ref.watch(
+      schoolConnectionProvider.select(
+        (connection) => connection.value == SchoolConnection.restoring,
+      ),
+    );
     final cache = ref.watch(schoolGradesCacheProvider);
     final grades = ref.watch(gradesProvider);
     final semesters = [
@@ -107,11 +112,10 @@ class _GradesPageState extends ConsumerState<GradesPage> {
             refresh: refresh,
             syncedAt: cache.value?.syncedAt,
             label: '教务成绩刷新',
+            restoring: restoring,
             cacheError: cache.hasError,
             compactSuccessLabel: '教务成绩 · 已同步',
-            reconnect: SchoolReconnectButton(
-              onConnected: () => ref.invalidate(refreshKey),
-            ),
+            reconnect: const SchoolReconnectButton(),
           ),
           const SizedBox(height: 10),
           DataPanel(

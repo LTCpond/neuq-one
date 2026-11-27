@@ -10,10 +10,12 @@ class SchoolLoginForm extends StatefulWidget {
     required this.canRememberPassword,
     required this.onSubmit,
     this.canSubmit = true,
+    this.initialFailure,
   });
 
   final bool canRememberPassword;
   final bool canSubmit;
+  final SchoolRequestFailure? initialFailure;
   final Future<void> Function(
     NeuqCredentials credentials,
     bool rememberPassword,
@@ -31,6 +33,12 @@ class _SchoolLoginFormState extends State<SchoolLoginForm> {
   SchoolRequestFailure? _failure;
   bool _rememberPassword = false;
   bool _submitting = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _failure = widget.initialFailure;
+  }
 
   @override
   void dispose() {
@@ -123,8 +131,7 @@ class _SchoolLoginFormState extends State<SchoolLoginForm> {
                 style: TextStyle(color: Theme.of(context).colorScheme.error),
               ),
             ),
-            if (failure == SchoolRequestFailure.verificationRequired ||
-                failure == SchoolRequestFailure.unsupportedLogin)
+            if (failure.requiresOfficialLogin)
               TextButton.icon(
                 onPressed: () =>
                     openOfficialPage(context, schoolWebEntry.toString()),

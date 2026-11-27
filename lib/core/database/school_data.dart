@@ -56,11 +56,18 @@ final schoolGradesCacheProvider =
 final schoolRefreshProvider = FutureProvider.autoDispose
     .family<void, SchoolDataSet>((ref, section) async {
       final source = ref.watch(schoolDataSourceProvider);
-      final session = ref.watch(schoolSessionProvider).asData?.value;
-      if (source == null || session == null) return;
+      if (source == null) return;
       final repository = ref.watch(schoolDataRepositoryProvider);
       await repository.refresh(section, source);
     }, retry: (_, _) => null);
+
+final refreshSchoolDataProvider = Provider<void Function()>(
+  (ref) => () {
+    for (final section in SchoolDataSet.values) {
+      ref.invalidate(schoolRefreshProvider(section));
+    }
+  },
+);
 
 final schoolDataRepositoryProvider = Provider.autoDispose(
   (ref) => SchoolDataRepository(ref.watch(databaseProvider)),

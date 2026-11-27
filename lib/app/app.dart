@@ -3,6 +3,7 @@ import 'package:material_ui/material_ui.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../core/auth/school_auth.dart';
+import '../core/database/school_data.dart';
 import '../core/diagnostics/diagnostics.dart';
 import '../core/storage/settings.dart';
 import '../core/theme/app_theme.dart';
@@ -20,14 +21,21 @@ class NeuqOneApp extends ConsumerStatefulWidget {
 class _NeuqOneAppState extends ConsumerState<NeuqOneApp> {
   bool _restoringSession = true;
   bool _updateStarted = false;
+  static const _schoolResumeInterval = Duration(minutes: 5);
+  DateTime? _backgroundedAt;
   late final AppLifecycleListener _lifecycle;
 
   @override
   void initState() {
     super.initState();
     _lifecycle = AppLifecycleListener(
+      onHide: _recordBackgroundTime,
+      onPause: _recordBackgroundTime,
       onResume: () {
         final session = ref.read(schoolSessionProvider).asData?.value;
+        final backgroundedAt = _backgroundedAt;
+        _backgroundedAt = null;
+        if (session != null) _resumeSchool(session, backgroundedAt).ignore();
         final reminders = ref.read(reminderSyncProvider).asData?.value;
         if (session != null || reminders?.condition != ReminderCondition.off) {
           ref.invalidate(reminderSyncProvider);
@@ -35,6 +43,49 @@ class _NeuqOneAppState extends ConsumerState<NeuqOneApp> {
         _startUpdateCheck();
       },
     );
+  }
+
+  void _recordBackgroundTime() =>
+      _backgroundedAt ??= ref.read(schoolSessionClockProvider)();
+
+  bool get _isForeground =>
+      mounted &&
+      WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed;
+
+  Future<void> _resumeSchool(
+    SchoolSession session,
+    DateTime? backgroundedAt,
+  ) async {
+    final status = ref.read(schoolSessionStatusProvider);
+    final now = ref.read(schoolSessionClockProvider)();
+    if (status.subject == session.subject &&
+        status.health == SchoolSessionHealth.connected &&
+        (backgroundedAt == null ||
+            now.difference(backgroundedAt) < _schoolResumeInterval)) {
+      ref.invalidate(schoolRefreshProvider(SchoolDataSet.timetable));
+      return;
+    }
+    if (status.subject == session.subject &&
+        status.health == SchoolSessionHealth.restoring) {
+      return;
+    }
+    try {
+      final recovered = await ref
+          .read(schoolSessionProvider.notifier)
+          .recoverSession(
+            trigger: SchoolRecoveryTrigger.foreground,
+            isForeground: () => _isForeground,
+          );
+      if (recovered && _isForeground) ref.read(refreshSchoolDataProvider)();
+    } on SchoolRequestFailure {
+      // The client publishes connection status and retry eligibility.
+    } catch (error) {
+      diagnostics.record(
+        DiagnosticModule.schoolAuth,
+        DiagnosticStage.foregroundRecovery,
+        error: error,
+      );
+    }
   }
 
   void _startUpdateCheck() {

@@ -1075,6 +1075,71 @@ void main() {
       if (section == SchoolDataSet.timetable) timetableRefreshes++;
     },
   );
+
+  var schoolNow = DateTime.utc(2026, 11, 27);
+  final recoveryTriggers = <SchoolRecoveryTrigger>[];
+  late Completer<bool> finishRecovery;
+  var resumedRefreshes = 0;
+  _appTest(
+    'long backgrounding checks school health without blocking cached pages',
+    (tester) async {
+      finishRecovery = Completer<bool>();
+      await _tab(tester, '我的');
+      final scope = ProviderScope.containerOf(
+        tester.element(find.byType(NavigationBar)),
+      );
+      final status = scope.read(schoolSessionStatusProvider.notifier);
+      void setHealth(SchoolSessionHealth health) =>
+          status.update((subject: _TestAuth._session.subject, health: health));
+      setHealth(SchoolSessionHealth.connected);
+      await tester.pumpAndSettle();
+
+      _resume(tester);
+      await tester.pumpAndSettle();
+      expect(recoveryTriggers, isEmpty);
+
+      final priorRefreshes = resumedRefreshes;
+      for (final state in [
+        AppLifecycleState.inactive,
+        AppLifecycleState.hidden,
+        AppLifecycleState.paused,
+      ]) {
+        tester.binding.handleAppLifecycleStateChanged(state);
+      }
+      schoolNow = schoolNow.add(const Duration(minutes: 6));
+      for (final state in [
+        AppLifecycleState.hidden,
+        AppLifecycleState.inactive,
+        AppLifecycleState.resumed,
+      ]) {
+        tester.binding.handleAppLifecycleStateChanged(state);
+      }
+      await tester.pump();
+      expect(recoveryTriggers, [SchoolRecoveryTrigger.foreground]);
+      expect(resumedRefreshes, priorRefreshes);
+      setHealth(SchoolSessionHealth.restoring);
+      await tester.pumpAndSettle();
+      expect(find.text('正在自动恢复教务连接'), findsOneWidget);
+      expect(find.byType(NavigationBar), findsOneWidget);
+      expect(find.text('学校身份已验证'), findsOneWidget);
+
+      setHealth(SchoolSessionHealth.connected);
+      finishRecovery.complete(true);
+      await tester.pumpAndSettle();
+      expect(find.text('教务会话正常'), findsOneWidget);
+      expect(resumedRefreshes, priorRefreshes + 1);
+    },
+    auth: _TestAuth(
+      onRecovery: (trigger) {
+        recoveryTriggers.add(trigger);
+        return finishRecovery.future;
+      },
+    ),
+    schoolSessionClock: () => schoolNow,
+    onRefresh: (section) {
+      if (section == SchoolDataSet.timetable) resumedRefreshes++;
+    },
+  );
 }
 
 void _appTest(
@@ -1089,6 +1154,7 @@ void _appTest(
   http.Response Function()? classroomResponse,
   DateTime Function()? classroomClock,
   DateTime Function()? timetableClock,
+  DateTime Function()? schoolSessionClock,
   List<SchoolPolicy>? schoolPolicies,
   Future<Uint8List> Function(SchoolPolicy)? schoolPolicyPdf,
   SchoolPolicySaver? schoolPolicySaver,
@@ -1117,6 +1183,8 @@ void _appTest(
         ProviderScope(
           overrides: [
             schoolAuthRepositoryProvider.overrideWithValue(auth),
+            if (schoolSessionClock != null)
+              schoolSessionClockProvider.overrideWithValue(schoolSessionClock),
             if (onRefresh != null)
               schoolRefreshProvider.overrideWith(
                 (ref, section) async => onRefresh(section),
@@ -1280,9 +1348,10 @@ Future<void> _createSemester(WidgetTester tester) async {
 }
 
 class _TestAuth implements SchoolAuthRepository {
-  const _TestAuth({this.restore = true, this.restoration});
+  const _TestAuth({this.restore = true, this.restoration, this.onRecovery});
   final bool restore;
   final Future<SchoolSession?> Function()? restoration;
+  final Future<bool> Function(SchoolRecoveryTrigger)? onRecovery;
 
   @override
   bool get available => true;
@@ -1297,6 +1366,16 @@ class _TestAuth implements SchoolAuthRepository {
   @override
   Future<SchoolSession?> restoreSession() =>
       restoration?.call() ?? Future.value(restore ? _session : null);
+  @override
+  Future<bool> recoverSession(
+    String subject, {
+    required SchoolRecoveryTrigger trigger,
+    bool Function()? isForeground,
+  }) async {
+    if (isForeground?.call() == false) return false;
+    return await onRecovery?.call(trigger) ?? true;
+  }
+
   @override
   Future<SchoolSession> signIn(
     NeuqCredentials credentials, {

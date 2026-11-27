@@ -2,6 +2,7 @@ import 'package:material_ui/material_ui.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../app/school_reconnect_button.dart';
+import '../../../core/auth/school_auth.dart';
 import '../../../core/database/school_data.dart';
 import '../../../core/storage/local_files.dart';
 import '../../../core/time/campus_clock.dart';
@@ -61,6 +62,11 @@ class _TimetablePageState extends ConsumerState<TimetablePage> {
     final refreshKey = schoolRefreshProvider(SchoolDataSet.timetable);
     final refresh = ref.watch(refreshKey);
     final sourceReady = ref.watch(schoolDataSourceProvider) != null;
+    final restoring = ref.watch(
+      schoolConnectionProvider.select(
+        (connection) => connection.value == SchoolConnection.restoring,
+      ),
+    );
     final cache = ref.watch(schoolTimetableCacheProvider);
 
     return Scaffold(
@@ -128,7 +134,7 @@ class _TimetablePageState extends ConsumerState<TimetablePage> {
         children: [
           if (sourceReady && refresh.isLoading)
             const LinearProgressIndicator(minHeight: 2),
-          if (refresh.hasError || cache.hasError)
+          if (restoring || refresh.hasError || cache.hasError)
             Padding(
               padding: const EdgeInsets.fromLTRB(8, 4, 8, 10),
               child: SchoolSyncStatus(
@@ -136,10 +142,9 @@ class _TimetablePageState extends ConsumerState<TimetablePage> {
                 refresh: refresh,
                 syncedAt: cache.value?.syncedAt,
                 label: '教务课表同步',
+                restoring: restoring,
                 cacheError: cache.hasError,
-                reconnect: SchoolReconnectButton(
-                  onConnected: () => ref.invalidate(refreshKey),
-                ),
+                reconnect: const SchoolReconnectButton(),
               ),
             ),
           DataPanel(

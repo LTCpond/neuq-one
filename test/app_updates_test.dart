@@ -837,6 +837,12 @@ class _UpdateAuth implements SchoolAuthRepository {
   @override
   Future<SchoolSession?> restoreSession() async => session;
   @override
+  Future<bool> recoverSession(
+    String subject, {
+    required SchoolRecoveryTrigger trigger,
+    bool Function()? isForeground,
+  }) async => false;
+  @override
   Future<SchoolSession> signIn(
     NeuqCredentials credentials, {
     required bool rememberPassword,

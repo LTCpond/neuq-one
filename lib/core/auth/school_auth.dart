@@ -10,7 +10,12 @@ import '../network/neuq_client.dart';
 import '../diagnostics/diagnostics.dart';
 import 'neuq_login_protocol.dart';
 
-export '../network/neuq_client.dart' show NeuqCredentials, SchoolRequestFailure;
+export '../network/neuq_client.dart'
+    show
+        NeuqCredentials,
+        SchoolRecoveryTrigger,
+        SchoolRequestFailure,
+        SchoolSessionHealth;
 
 enum SchoolConnection {
   unavailable,
@@ -39,6 +44,12 @@ abstract interface class SchoolAuthRepository {
   /// Restores the device identity established by a previous school login.
   Future<SchoolSession?> restoreSession();
 
+  Future<bool> recoverSession(
+    String subject, {
+    required SchoolRecoveryTrigger trigger,
+    bool Function()? isForeground,
+  });
+
   Future<SchoolSession> signIn(
     NeuqCredentials credentials, {
     required bool rememberPassword,
@@ -61,6 +72,12 @@ class UnavailableSchoolAuthRepository implements SchoolAuthRepository {
   bool get canRememberPassword => false;
   @override
   Future<SchoolSession?> restoreSession() async => null;
+  @override
+  Future<bool> recoverSession(
+    String subject, {
+    required SchoolRecoveryTrigger trigger,
+    bool Function()? isForeground,
+  }) async => false;
   @override
   Future<SchoolSession> signIn(
     NeuqCredentials credentials, {
@@ -96,6 +113,17 @@ class _NeuqAuthRepository implements SchoolAuthRepository {
     final subject = await _loginStore.restoreSubject();
     return subject == null ? null : SchoolSession(subject: subject);
   }
+
+  @override
+  Future<bool> recoverSession(
+    String subject, {
+    required SchoolRecoveryTrigger trigger,
+    bool Function()? isForeground,
+  }) => _client.recoverSession(
+    subject,
+    trigger: trigger,
+    isForeground: isForeground,
+  );
 
   @override
   Future<SchoolSession> signIn(
@@ -191,7 +219,11 @@ class _SchoolLoginStore {
       );
 
   Future<void> forget(String subject) async {
-    if (await credentialsFor(subject) != null) await save(subject, null);
+    final value = await _record();
+    if (value == null || value['subject'] != subject) return;
+    if (value.containsKey('username') || value.containsKey('password')) {
+      await save(subject, null);
+    }
   }
 
   Future<void> clear() async {
@@ -211,6 +243,10 @@ final neuqHttpClientFactoryProvider = Provider<http.Client Function()>(
   (_) => http.Client.new,
 );
 
+final schoolSessionClockProvider = Provider<DateTime Function()>(
+  (_) => DateTime.now,
+);
+
 final schoolSessionStatusProvider =
     NotifierProvider<SchoolSessionStatusController, SchoolSessionStatus>(
       SchoolSessionStatusController.new,
@@ -226,14 +262,19 @@ class SchoolSessionStatusController extends Notifier<SchoolSessionStatus> {
   }
 }
 
-final neuqClientProvider = Provider<NeuqClient>((ref) {
+final Provider<NeuqClient> neuqClientProvider = Provider((ref) {
   final store = ref.watch(_schoolLoginStoreProvider);
   final client = NeuqClient(
-    readRemembered: (subject) => defaultTargetPlatform == TargetPlatform.android
+    readRemembered: (subject) =>
+        !kIsWeb && defaultTargetPlatform == TargetPlatform.android
         ? store.credentialsFor(subject)
         : Future.value(),
-    forgetRemembered: store.forget,
+    forgetRemembered: (subject) async {
+      await store.forget(subject);
+      if (ref.mounted) ref.invalidate(rememberedSchoolPasswordProvider);
+    },
     createClient: ref.watch(neuqHttpClientFactoryProvider),
+    clock: ref.watch(schoolSessionClockProvider),
     onSessionStatus: (status) {
       if (ref.mounted) {
         ref.read(schoolSessionStatusProvider.notifier).update(status);
@@ -260,6 +301,7 @@ final schoolSessionProvider =
 class SchoolSessionController extends AsyncNotifier<SchoolSession?> {
   int _revision = 0;
   bool _disconnecting = false;
+  bool _signingIn = false;
 
   @override
   Future<SchoolSession?> build() async {
@@ -276,25 +318,58 @@ class SchoolSessionController extends AsyncNotifier<SchoolSession?> {
     }
   }
 
+  Future<bool> recoverSession({
+    required SchoolRecoveryTrigger trigger,
+    bool Function()? isForeground,
+  }) async {
+    final session = state.asData?.value;
+    if (_disconnecting || _signingIn || session == null) return false;
+    final revision = _revision;
+    final recovered = await ref
+        .read(schoolAuthRepositoryProvider)
+        .recoverSession(
+          session.subject,
+          trigger: trigger,
+          isForeground: isForeground,
+        );
+    return recovered && ref.mounted && revision == _revision;
+  }
+
   Future<void> signIn(
     NeuqCredentials credentials, {
     required bool rememberPassword,
+    String? expectedSubject,
   }) async {
-    if (state.isLoading || _disconnecting) return;
+    if (state.isLoading || _disconnecting || _signingIn) {
+      throw SchoolRequestFailure.cancelled;
+    }
     final repository = ref.read(schoolAuthRepositoryProvider);
-    if (!repository.available) return;
+    if (!repository.available) throw SchoolRequestFailure.unavailable;
     final previous = state.asData?.value;
+    if (expectedSubject != null && previous?.subject != expectedSubject) {
+      throw SchoolRequestFailure.cancelled;
+    }
     final revision = ++_revision;
-    state = const AsyncLoading();
+    _signingIn = true;
+    if (expectedSubject == null) state = const AsyncLoading();
     try {
       final session = await repository.signIn(
         credentials,
         rememberPassword: rememberPassword,
+        expectedSubject: expectedSubject,
       );
-      if (ref.mounted && revision == _revision) state = AsyncData(session);
+      if (!ref.mounted || revision != _revision) {
+        throw SchoolRequestFailure.cancelled;
+      }
+      if (expectedSubject == null) state = AsyncData(session);
+      ref.invalidate(rememberedSchoolPasswordProvider);
     } catch (_) {
-      if (ref.mounted && revision == _revision) state = AsyncData(previous);
+      if (ref.mounted && revision == _revision && expectedSubject == null) {
+        state = AsyncData(previous);
+      }
       rethrow;
+    } finally {
+      _signingIn = false;
     }
   }
 

@@ -130,7 +130,6 @@ class _NavigationState extends ConsumerState<_Navigation> {
     super.initState();
     _lifecycle = AppLifecycleListener(
       onResume: () {
-        ref.invalidate(schoolRefreshProvider(SchoolDataSet.timetable));
         ref.invalidate(timetableDateProvider);
       },
     );

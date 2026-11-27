@@ -11,18 +11,22 @@ class NeuqSchoolDataSource implements SchoolDataSource {
 
   final NeuqClient _client;
   final String _subject;
-  (NeuqTimetableEntry, Map<String, Semester>)? _knownCalendar;
-  DateTime? _calendarReadAt;
+  ({
+    NeuqSession session,
+    DateTime readAt,
+    (NeuqTimetableEntry, Map<String, Semester>) data,
+  })?
+  _knownCalendar;
 
   Future<(NeuqTimetableEntry, Map<String, Semester>)> _calendar(
     NeuqSession session,
   ) async {
     final previous = _knownCalendar;
-    final timestamp = _calendarReadAt;
     if (previous != null &&
-        timestamp != null &&
-        DateTime.now().difference(timestamp) < const Duration(minutes: 30)) {
-      return previous;
+        identical(previous.session, session) &&
+        DateTime.now().difference(previous.readAt) <
+            const Duration(minutes: 30)) {
+      return previous.data;
     }
     final entry = readNeuqTimetableEntry(
       await session.request(NeuqPage.timetable),
@@ -33,8 +37,9 @@ class NeuqSchoolDataSource implements SchoolDataSource {
         form: {'tagId': entry.calendarTag, 'dataType': 'semesterCalendar'},
       ),
     );
-    _calendarReadAt = DateTime.now();
-    return _knownCalendar = (entry, terms);
+    final data = (entry, terms);
+    _knownCalendar = (session: session, readAt: DateTime.now(), data: data);
+    return data;
   }
 
   @override

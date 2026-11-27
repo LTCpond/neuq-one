@@ -4,7 +4,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../app/school_reconnect_button.dart';
 import '../../../core/auth/school_auth.dart';
-import '../../../core/database/school_data.dart';
 import '../../../core/diagnostics/diagnostics.dart';
 import '../../../core/network/official_browser.dart';
 import '../../../core/storage/settings.dart';
@@ -117,16 +116,11 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
                 status: status,
                 onReconnect:
                     !_busy &&
-                        (status == SchoolConnection.expired ||
+                        (status == SchoolConnection.restoring ||
+                            status == SchoolConnection.expired ||
                             status == SchoolConnection.offline ||
                             status == SchoolConnection.unknown)
-                    ? SchoolReconnectButton(
-                        onConnected: () {
-                          for (final section in SchoolDataSet.values) {
-                            ref.invalidate(schoolRefreshProvider(section));
-                          }
-                        },
-                      )
+                    ? const SchoolReconnectButton()
                     : null,
                 onLogout:
                     status != SchoolConnection.unavailable &&
@@ -494,8 +488,8 @@ class _AccountCard extends StatelessWidget {
                   SchoolConnection.unavailable ||
                   SchoolConnection.disconnected => '统一身份认证',
                   SchoolConnection.connected => '教务会话正常',
-                  SchoolConnection.restoring => '正在恢复教务会话',
-                  SchoolConnection.expired => '教务会话已过期，请重新登录',
+                  SchoolConnection.restoring => '正在自动恢复教务连接',
+                  SchoolConnection.expired => '教务会话待恢复，正在使用本地数据',
                   SchoolConnection.offline => '教务连接失败，正在使用本地数据',
                   SchoolConnection.unknown => '教务状态尚未确认',
                 },
