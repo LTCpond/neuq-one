@@ -19,6 +19,7 @@ import '../../timetable/presentation/semester_menu.dart';
 import '../../timetable/presentation/timetable_editors.dart';
 import '../data/local_grades.dart';
 import '../domain/grades.dart';
+import 'semester_gpa_chart.dart';
 
 class GradesPage extends ConsumerStatefulWidget {
   const GradesPage({super.key});
@@ -29,6 +30,7 @@ class GradesPage extends ConsumerStatefulWidget {
 
 class _GradesPageState extends ConsumerState<GradesPage> {
   String? _semesterId;
+  bool _allSemesters = false;
 
   @override
   Widget build(BuildContext context) {
@@ -42,14 +44,14 @@ class _GradesPageState extends ConsumerState<GradesPage> {
       ),
     );
     final cache = ref.watch(schoolGradesCacheProvider);
+    final gradeBook = cache.value?.data;
     final grades = ref.watch(gradesProvider);
-    final semesters = [
-      ...?cache.value?.data.semesters,
-      ...?terms.value?.semesters,
-    ]..sort((a, b) => b.start.compareTo(a.start));
-    final term =
-        semesters.where((entry) => entry.id == _semesterId).firstOrNull ??
-        currentSemester(semesters, campusNow());
+    final semesters = [...?gradeBook?.semesters, ...?terms.value?.semesters]
+      ..sort((a, b) => b.start.compareTo(a.start));
+    final term = _allSemesters
+        ? null
+        : semesters.where((entry) => entry.id == _semesterId).firstOrNull ??
+              currentSemester(semesters, campusNow());
     final fromSchool = term != null && isSchoolRecord(term.id);
     final repository = ref.watch(gradesRepositoryProvider);
     final admissionYear = ref
@@ -72,11 +74,15 @@ class _GradesPageState extends ConsumerState<GradesPage> {
           child: CampusPageTitle('成绩中心', eyebrow: 'NEUQ · ACADEMIC'),
         ),
         actions: [
-          if (term != null) ...[
+          if (semesters.isNotEmpty) ...[
             SemesterMenu(
               semesters: semesters,
               selected: term,
-              onChanged: (id) => setState(() => _semesterId = id),
+              onChanged: (id) => setState(() {
+                _semesterId = id;
+                _allSemesters = false;
+              }),
+              onSelectAll: () => setState(() => _allSemesters = true),
             ),
             const SizedBox(width: 6),
           ],
@@ -135,7 +141,7 @@ class _GradesPageState extends ConsumerState<GradesPage> {
           DataPanel(
             value: terms,
             retry: () => ref.invalidate(timetableProvider),
-            builder: (_) => term == null
+            builder: (_) => semesters.isEmpty
                 ? StatePanel(
                     '先创建一个学期',
                     '课表和成绩共享学期设置。',
@@ -152,13 +158,20 @@ class _GradesPageState extends ConsumerState<GradesPage> {
                     value: grades,
                     retry: () => ref.invalidate(gradesProvider),
                     builder: (localGrades) {
-                      final real = [
-                        ...?cache.value?.data.grades,
-                        ...localGrades,
-                      ].where((grade) => !grade.demo).toList();
-                      final rows = real
-                          .where((grade) => grade.semesterId == term.id)
+                      final rows = [...?gradeBook?.grades, ...localGrades]
+                          .where(
+                            (grade) =>
+                                !grade.demo &&
+                                (term == null || grade.semesterId == term.id),
+                          )
                           .toList();
+                      final gradesBySemester = <String, List<Grade>>{};
+                      for (final grade in rows) {
+                        (gradesBySemester[grade.semesterId] ??= []).add(grade);
+                      }
+                      final visibleSemesters = term == null
+                          ? semesters
+                          : [term];
                       return Column(
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
@@ -168,34 +181,63 @@ class _GradesPageState extends ConsumerState<GradesPage> {
                             summary: GradeSummary(rows, scale),
                             scale: scale,
                             fromSchool: fromSchool,
-                            semesterGpa: cache.value?.data.semesterGpa[term.id],
-                            cumulativeGpa: cache.value?.data.cumulativeGpa,
+                            allSemesters: _allSemesters,
+                            semesterGpa: gradeBook?.semesterGpa[term?.id],
+                            cumulativeGpa: gradeBook?.cumulativeGpa,
+                            semesterGpaTrend: [
+                              if (_allSemesters)
+                                for (final semester in semesters.reversed)
+                                  (
+                                    semester: semester,
+                                    gpa:
+                                        gradeBook?.semesterGpa[semester.id] ??
+                                        GradeSummary(
+                                          gradesBySemester[semester.id] ??
+                                              const [],
+                                          scale,
+                                        ).gpa,
+                                  ),
+                            ],
                           ),
                           const SizedBox(height: 18),
                           const CampusSectionHeading('课程成绩'),
                           const SizedBox(height: 8),
                           if (rows.isEmpty)
                             StatePanel(
-                              '此学期暂无成绩',
-                              isSchoolRecord(term.id)
-                                  ? '当前教务快照无此学期成绩。'
-                                  : '录入成绩后可查看平均分、学分和绩点。',
+                              _allSemesters ? '暂无成绩' : '此学期暂无成绩',
+                              switch ((_allSemesters, fromSchool)) {
+                                (true, _) => '可同步教务成绩，或选择本地学期录入成绩。',
+                                (_, true) => '当前教务快照无此学期成绩。',
+                                _ => '录入成绩后可查看平均分、学分和绩点。',
+                              },
                               icon: Icons.insights_outlined,
                             ),
-                          for (final grade in rows)
-                            Padding(
-                              padding: const EdgeInsets.only(bottom: 8),
-                              child: _GradeTile(
-                                grade: grade,
-                                onTap: () => _detail(
-                                  context,
-                                  grade,
-                                  term,
-                                  scale,
-                                  repository,
+                          for (final semester in visibleSemesters)
+                            if (gradesBySemester[semester.id]
+                                case final grades?) ...[
+                              if (_allSemesters)
+                                Padding(
+                                  padding: const EdgeInsets.only(
+                                    top: 4,
+                                    bottom: 8,
+                                  ),
+                                  child: CampusSectionHeading(semester.name),
                                 ),
-                              ),
-                            ),
+                              for (final grade in grades)
+                                Padding(
+                                  padding: const EdgeInsets.only(bottom: 8),
+                                  child: _GradeTile(
+                                    grade: grade,
+                                    onTap: () => _detail(
+                                      context,
+                                      grade,
+                                      semester,
+                                      scale,
+                                      repository,
+                                    ),
+                                  ),
+                                ),
+                            ],
                         ],
                       );
                     },
@@ -212,6 +254,8 @@ class _SummaryCard extends StatelessWidget {
     required this.summary,
     required this.scale,
     required this.fromSchool,
+    required this.allSemesters,
+    required this.semesterGpaTrend,
     this.semesterGpa,
     this.cumulativeGpa,
   });
@@ -219,6 +263,8 @@ class _SummaryCard extends StatelessWidget {
   final GradeSummary summary;
   final GpaScale scale;
   final bool fromSchool;
+  final bool allSemesters;
+  final List<SemesterGpaPoint> semesterGpaTrend;
   final double? semesterGpa;
   final double? cumulativeGpa;
 
@@ -226,21 +272,26 @@ class _SummaryCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
     final dark = colors.brightness == Brightness.dark;
-    final green = dark ? const Color(0xFFBFEBD2) : const Color(0xFF225E43);
-    final passRate = summary.credits == 0
-        ? null
-        : (summary.passedCredits / summary.credits).clamp(0.0, 1.0);
+    final credits = _CreditsTile(summary: summary, compact: allSemesters);
+    final reportedGpa = allSemesters ? cumulativeGpa : semesterGpa;
+    final gpaLabel = allSemesters
+        ? (reportedGpa == null ? '累计 GPA' : '教务累计 GPA')
+        : '学期 GPA';
     final gpa = Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         _GpaTile(
-          label: '学期 GPA',
-          value: (semesterGpa ?? summary.gpa)?.toStringAsFixed(4) ?? '—',
+          label: gpaLabel,
+          value: (reportedGpa ?? summary.gpa)?.toStringAsFixed(4) ?? '—',
           background: dark ? const Color(0xFF2C4065) : colors.primaryContainer,
           foreground: colors.onPrimaryContainer,
-          height: fromSchool ? 86 : 182,
+          height: fromSchool || allSemesters ? 86 : 182,
+          fontSize: allSemesters ? 28 : 30,
         ),
-        if (fromSchool) ...[
+        if (allSemesters) ...[
+          const SizedBox(height: 10),
+          credits,
+        ] else if (fromSchool) ...[
           const SizedBox(height: 10),
           _GpaTile(
             label: '累计 GPA',
@@ -275,72 +326,131 @@ class _SummaryCard extends StatelessWidget {
                 ),
         ),
         const SizedBox(height: 10),
-        Card(
-          color: dark ? const Color(0xFF234B3A) : const Color(0xFFD9EFE3),
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(14, 11, 14, 12),
-            child: DefaultTextStyle.merge(
-              style: TextStyle(
-                color: green,
-                fontSize: 12,
-                fontWeight: FontWeight.w700,
-              ),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.end,
-                children: [
-                  Expanded(
-                    flex: 46,
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text('通过 / 登记学分'),
-                        const SizedBox(height: 5),
-                        Text(
-                          '${_number(summary.passedCredits)} / ${_number(summary.credits)}',
-                          style: const TextStyle(fontSize: 27),
-                        ),
-                      ],
-                    ),
-                  ),
-                  if (passRate != null) ...[
-                    const SizedBox(width: 12),
-                    Expanded(
-                      flex: 54,
-                      child: Padding(
-                        padding: const EdgeInsets.only(bottom: 11),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.end,
-                          children: [
-                            Text('${(passRate * 100).round()}% 通过'),
-                            const SizedBox(height: 16),
-                            LinearProgressIndicator(
-                              value: passRate,
-                              minHeight: 7,
-                              borderRadius: BorderRadius.circular(5),
-                              backgroundColor: dark
-                                  ? const Color(0xFF38634C)
-                                  : const Color(0xFFB7D9C7),
-                              color: const Color(0xFF43886A),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ],
-                ],
-              ),
-            ),
-          ),
-        ),
-        if (semesterGpa == null && summary.gpa != null)
+        if (allSemesters)
+          SemesterGpaChart(points: semesterGpaTrend)
+        else
+          credits,
+        if (reportedGpa == null && summary.gpa != null)
           Padding(
             padding: const EdgeInsets.only(top: 8),
             child: Text(
-              '学期 GPA 按${scale.label}本科办法和当前成绩计算',
+              '$gpaLabel 按${scale.label}本科办法和当前成绩计算',
               style: TextStyle(color: colors.onSurfaceVariant, fontSize: 12),
             ),
           ),
       ],
+    );
+  }
+}
+
+class _CreditsTile extends StatelessWidget {
+  const _CreditsTile({required this.summary, required this.compact});
+
+  final GradeSummary summary;
+  final bool compact;
+
+  @override
+  Widget build(BuildContext context) {
+    final dark = Theme.of(context).brightness == Brightness.dark;
+    final passRate = summary.credits == 0
+        ? null
+        : (summary.passedCredits / summary.credits).clamp(0.0, 1.0);
+    final value = Text(
+      '${_number(summary.passedCredits)} / ${_number(summary.credits)}',
+      style: TextStyle(
+        fontSize: compact ? 23 : 27,
+        height: compact ? 1.15 : null,
+      ),
+    );
+    const label = Text('通过 / 登记学分');
+    final progress = passRate == null
+        ? null
+        : LinearProgressIndicator(
+            value: passRate,
+            minHeight: compact ? 5 : 7,
+            borderRadius: BorderRadius.circular(5),
+            backgroundColor: dark
+                ? const Color(0xFF38634C)
+                : const Color(0xFFB7D9C7),
+            color: const Color(0xFF43886A),
+          );
+    return Card(
+      color: dark ? const Color(0xFF234B3A) : const Color(0xFFD9EFE3),
+      child: ConstrainedBox(
+        constraints: BoxConstraints(minHeight: compact ? 86 : 0),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(14, 11, 14, 12),
+          child: DefaultTextStyle.merge(
+            style: TextStyle(
+              color: dark ? const Color(0xFFBFEBD2) : const Color(0xFF225E43),
+              fontSize: 12,
+              fontWeight: FontWeight.w700,
+            ),
+            child: compact
+                ? Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      label,
+                      const SizedBox(height: 4),
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.baseline,
+                        textBaseline: TextBaseline.alphabetic,
+                        children: [
+                          Expanded(
+                            child: FittedBox(
+                              fit: BoxFit.scaleDown,
+                              alignment: Alignment.centerLeft,
+                              child: value,
+                            ),
+                          ),
+                          if (passRate != null) ...[
+                            const SizedBox(width: 6),
+                            Text(
+                              '${(passRate * 100).round()}%',
+                              style: const TextStyle(fontSize: 10),
+                            ),
+                          ],
+                        ],
+                      ),
+                      if (progress != null) ...[
+                        const SizedBox(height: 7),
+                        progress,
+                      ],
+                    ],
+                  )
+                : Row(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      Expanded(
+                        flex: 46,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [label, const SizedBox(height: 5), value],
+                        ),
+                      ),
+                      if (passRate != null) ...[
+                        const SizedBox(width: 12),
+                        Expanded(
+                          flex: 54,
+                          child: Padding(
+                            padding: const EdgeInsets.only(bottom: 11),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.end,
+                              children: [
+                                Text('${(passRate * 100).round()}% 通过'),
+                                const SizedBox(height: 16),
+                                progress!,
+                              ],
+                            ),
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+          ),
+        ),
+      ),
     );
   }
 }
@@ -431,6 +541,7 @@ class _GpaTile extends StatelessWidget {
     required this.background,
     required this.foreground,
     required this.height,
+    this.fontSize = 30,
   });
 
   final String label;
@@ -438,6 +549,7 @@ class _GpaTile extends StatelessWidget {
   final Color background;
   final Color foreground;
   final double height;
+  final double fontSize;
 
   @override
   Widget build(BuildContext context) => Card(
@@ -464,7 +576,7 @@ class _GpaTile extends StatelessWidget {
               child: Text(
                 value,
                 style: TextStyle(
-                  fontSize: 30,
+                  fontSize: fontSize,
                   height: 1.13,
                   fontWeight: FontWeight.w800,
                   color: foreground,

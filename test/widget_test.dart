@@ -320,6 +320,119 @@ void main() {
     ),
   );
 
+  _appTest(
+    'all semesters combines cached and local grades under their own semesters',
+    (tester) async {
+      tester.view.physicalSize = const Size(360, 760);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      await tester.pumpAndSettle();
+      await _tab(tester, '成绩');
+      final container = ProviderScope.containerOf(
+        tester.element(find.byType(NavigationBar)),
+      );
+      await container
+          .read(gradesRepositoryProvider)
+          .save(
+            const Grade(
+              id: 'local:grade',
+              semesterId: 'local:term',
+              name: '本地课程',
+              credit: 2,
+              score: 70,
+              kind: GradeKind.required,
+            ),
+          );
+      await tester.pumpAndSettle();
+      expect(find.text('本地课程'), findsNothing);
+
+      final menu = find.byTooltip('选择学期');
+      final all = find.widgetWithText(CheckedPopupMenuItem<String>, '全部学期');
+      await tester.tap(menu);
+      await tester.pumpAndSettle();
+      await tester.tap(all);
+      await tester.pumpAndSettle();
+
+      expect(find.text('全部学期'), findsOneWidget);
+      expect(find.text('教务累计 GPA'), findsOneWidget);
+      expect(find.text('3.6502'), findsOneWidget);
+      expect(find.text('80.0'), findsOneWidget);
+      expect(find.text('5 / 5'), findsOneWidget);
+      final average = tester.getTopLeft(find.text('平均分'));
+      final gpa = tester.getTopLeft(find.text('教务累计 GPA'));
+      final credits = tester.getTopLeft(find.text('通过 / 登记学分'));
+      final trend = tester.getTopLeft(find.text('各学期 GPA 趋势'));
+      expect(gpa.dx, greaterThan(average.dx));
+      expect(credits.dx, closeTo(gpa.dx, 2));
+      expect(credits.dy, greaterThan(gpa.dy));
+      expect(trend.dx, lessThan(credits.dx));
+      expect(trend.dy, greaterThan(credits.dy));
+      final localPoint = find.byWidgetPredicate(
+        (widget) => widget is Tooltip && widget.message == '本地学期 · GPA 2.0000',
+      );
+      final schoolPoint = find.byWidgetPredicate(
+        (widget) => widget is Tooltip && widget.message == '教务学期 · GPA 3.7123',
+      );
+      expect(
+        tester.getCenter(localPoint).dx,
+        lessThan(tester.getCenter(schoolPoint).dx),
+      );
+      expect(find.text('教务课程'), findsOneWidget);
+      expect(find.text('录入成绩'), findsNothing);
+      final localCourse = find.text('本地课程');
+      await tester.ensureVisible(localCourse);
+      await tester.pumpAndSettle();
+      await tester.tap(localCourse);
+      await tester.pumpAndSettle();
+      expect(find.textContaining('本地学期\n'), findsOneWidget);
+      expect(find.widgetWithText(FilledButton, '编辑'), findsOneWidget);
+      Navigator.of(tester.element(find.byType(AlertDialog))).pop();
+      await tester.pumpAndSettle();
+
+      await tester.tap(menu);
+      await tester.pumpAndSettle();
+      expect(tester.widget<CheckedPopupMenuItem<String>>(all).checked, isTrue);
+      await tester.tap(
+        find.widgetWithText(CheckedPopupMenuItem<String>, '本地学期'),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('教务课程'), findsNothing);
+      expect(find.text('本地课程'), findsOneWidget);
+      expect(find.text('录入成绩'), findsOneWidget);
+      expect(find.text('各学期 GPA 趋势'), findsNothing);
+    },
+    initialTimetable: Timetable([
+      Semester(
+        id: 'local:term',
+        name: '本地学期',
+        start: DateTime.utc(2024, 9, 2),
+        weeks: 18,
+      ),
+    ], const []),
+    schoolGrades: SchoolGradeBook(
+      [
+        Semester(
+          id: 'school:term',
+          name: '教务学期',
+          start: DateTime.utc(2025, 9, 1),
+          weeks: 18,
+        ),
+      ],
+      const [
+        Grade(
+          id: 'school:grade',
+          semesterId: 'school:term',
+          name: '教务课程',
+          credit: 3,
+          score: 90,
+          kind: GradeKind.required,
+        ),
+      ],
+      semesterGpa: const {'school:term': 3.7123},
+      cumulativeGpa: 3.6502,
+    ),
+  );
+
   final planRefreshes = <SchoolDataSet>[];
   _appTest(
     'grades open the plan audit and expand courses from the last snapshot',
@@ -624,6 +737,19 @@ void main() {
 
     expect(find.text('3.8000'), findsOneWidget);
     expect(find.text('线性代数'), findsOneWidget);
+
+    await tester.tap(find.byTooltip('选择学期'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(CheckedPopupMenuItem<String>, '全部学期'));
+    await tester.pumpAndSettle();
+    expect(find.text('累计 GPA'), findsOneWidget);
+    expect(find.text('3.8000'), findsOneWidget);
+    expect(
+      find.byWidgetPredicate(
+        (widget) => widget is Tooltip && widget.message == '测试学期 · GPA 3.8000',
+      ),
+      findsOneWidget,
+    );
   });
 
   _appTest('the services menu opens mail and employment within its branch', (

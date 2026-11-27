@@ -9,27 +9,44 @@ class SemesterMenu extends StatelessWidget {
     required this.semesters,
     required this.selected,
     required this.onChanged,
-  });
+    this.onSelectAll,
+  }) : assert(selected != null || onSelectAll != null);
 
+  // Stored semester IDs are nonempty.
+  static const _allSemesters = '';
   final List<Semester> semesters;
-  final Semester selected;
+  final Semester? selected;
   final ValueChanged<String> onChanged;
+  final VoidCallback? onSelectAll;
 
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
-    final (year, name) = _semesterLabel(selected.name);
+    final selectedName = selected?.name ?? '全部学期';
+    final (year, name) = _semesterLabel(selectedName);
     return PopupMenuButton<String>(
       tooltip: '选择学期',
-      initialValue: selected.id,
-      onSelected: onChanged,
+      initialValue: selected?.id ?? _allSemesters,
+      onSelected: (id) {
+        if (id == _allSemesters) {
+          onSelectAll?.call();
+        } else {
+          onChanged(id);
+        }
+      },
       position: PopupMenuPosition.under,
       borderRadius: BorderRadius.circular(12),
       itemBuilder: (context) => [
+        if (onSelectAll != null)
+          CheckedPopupMenuItem<String>(
+            value: _allSemesters,
+            checked: selected == null,
+            child: const Text('全部学期'),
+          ),
         for (final semester in semesters)
           CheckedPopupMenuItem<String>(
             value: semester.id,
-            checked: semester.id == selected.id,
+            checked: semester.id == selected?.id,
             child: Text(semester.name),
           ),
       ],
@@ -41,7 +58,7 @@ class SemesterMenu extends StatelessWidget {
           borderRadius: BorderRadius.circular(12),
         ),
         child: Semantics(
-          value: selected.name,
+          value: selectedName,
           child: MediaQuery.withClampedTextScaling(
             maxScaleFactor: 1.35,
             child: Padding(
