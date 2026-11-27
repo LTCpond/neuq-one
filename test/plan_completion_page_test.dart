@@ -170,7 +170,7 @@ void main() {
                       3,
                       '2-1',
                       null,
-                      remark: '替代课程：线性代数 A',
+                      remark: '替代课程：线性代数A[306011201]',
                     ),
                   ],
                 )
@@ -196,7 +196,7 @@ void main() {
       Grade(
         id: 'school:la-a',
         semesterId: 'school:grade-term',
-        name: '线性代数 A',
+        name: '线性代数A',
         credit: 4,
         score: score,
         kind: GradeKind.required,
@@ -495,6 +495,8 @@ void main() {
     expect(inSheet('完成学分'), findsOneWidget);
     expect(inSheet('暂计完成学分'), findsNothing);
     expect(inSheet('替代课程成绩'), findsOneWidget);
+    expect(inSheet('线性代数A'), findsOneWidget);
+    expect(inSheet('线性代数A[306011201]'), findsNothing);
     expect(inSheet('4 学分 · 成绩 95 · 2025-2026 上'), findsOneWidget);
 
     await tester.tapAt(const Offset(8, 8));

@@ -87,16 +87,22 @@ int _compareMatches(PlanSubstituteMatch a, PlanSubstituteMatch b) {
   return a.grade.id.compareTo(b.grade.id);
 }
 
+/// Removes a bracketed course code such as `[306011201]` from a course name.
+/// It is used both for matching and for the substitute-course display.
+String stripPlanCourseCode(String value) =>
+    value.replaceAll(RegExp(r'[\[［【〔][^\]］】〕]*[\]］】〕]'), '').trim();
+
 /// Whitespace, full-width parentheses and Latin case are normalized before
-/// exact matching. Parentheses are removed but their content is kept, so
-/// "线性代数（A）" and "线性代数 A" match.
-String normalizePlanCourseName(String value) => value
-    .trim()
-    .toLowerCase()
-    .replaceAll(RegExp(r'[\s\u00a0\u3000]+'), '')
-    .replaceAll('（', '(')
-    .replaceAll('）', ')')
-    .replaceAll(RegExp(r'[()]'), '');
+/// exact matching. Bracketed course codes are removed, while parentheses are
+/// removed without dropping their content, so "线性代数（A）" and
+/// "线性代数 A" match.
+String normalizePlanCourseName(String value) =>
+    stripPlanCourseCode(value)
+        .toLowerCase()
+        .replaceAll(RegExp(r'[\s\u00a0\u3000]+'), '')
+        .replaceAll('（', '(')
+        .replaceAll('）', ')')
+        .replaceAll(RegExp(r'[()]'), '');
 
 final planSubstituteIndexProvider = Provider.autoDispose<PlanSubstituteIndex>((
   ref,

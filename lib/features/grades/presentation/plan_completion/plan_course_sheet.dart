@@ -185,7 +185,7 @@ class _PlanCourseDetailSheetState
                 const SizedBox(height: 10),
                 _SubstitutionPanel(
                   courseName: widget.course.name,
-                  substitute: substitute,
+                  substitute: stripPlanCourseCode(substitute),
                   status: status,
                   match: match,
                   gradesLoading: grades.isLoading,

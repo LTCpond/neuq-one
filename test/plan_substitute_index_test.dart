@@ -61,7 +61,7 @@ void main() {
         SchoolGradeBook([autumn, spring], grades),
       );
 
-  test('normalizes whitespace, parentheses and Latin case', () {
+  test('normalizes whitespace, parentheses, brackets and Latin case', () {
     expect(
       normalizePlanCourseName(' 线性代数（A） '),
       normalizePlanCourseName('线性代数 A'),
@@ -70,17 +70,26 @@ void main() {
       normalizePlanCourseName('C++程序设计'),
       normalizePlanCourseName('c++ 程序设计'),
     );
+    expect(stripPlanCourseCode('线性代数A[306011201]'), '线性代数A');
+    expect(
+      normalizePlanCourseName('线性代数A[306011201]'),
+      normalizePlanCourseName('线性代数A'),
+    );
+    expect(
+      normalizePlanCourseName('线性代数A【306011201】'),
+      normalizePlanCourseName('线性代数A'),
+    );
     expect(
       normalizePlanCourseName('线性代数 A'),
       isNot(normalizePlanCourseName('线性代数 B')),
     );
   });
 
-  test('matches a substitute grade by normalized name', () {
+  test('matches a substitute grade after removing its bracketed code', () {
     final index = indexWith([
       grade('school:la-a', name: '线性代数A', score: 92, semesterId: autumn.id),
     ]);
-    final course = planCourse(remark: '替代课程：线性代数 A');
+    final course = planCourse(remark: '替代课程：线性代数A[306011201]');
     final match = index.matchFor(course);
     expect(match, isNotNull);
     expect(match!.grade.name, '线性代数A');
