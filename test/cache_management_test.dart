@@ -8,13 +8,17 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
+import 'package:material_ui/material_ui.dart'
+    show Brightness, FilledButton, ListTile, MaterialApp, Size;
 import 'package:neuq_one/core/database/app_database.dart';
 import 'package:neuq_one/core/diagnostics/diagnostics.dart';
 import 'package:neuq_one/core/network/public_data_client.dart';
 import 'package:neuq_one/core/storage/cache_files.dart';
 import 'package:neuq_one/core/storage/picker_cache.dart';
 import 'package:neuq_one/core/storage/settings.dart';
+import 'package:neuq_one/core/theme/app_theme.dart';
 import 'package:neuq_one/features/profile/data/cache_management.dart';
+import 'package:neuq_one/features/profile/presentation/cache_management_page.dart';
 import 'package:neuq_one/features/services/data/campus_map.dart';
 import 'package:neuq_one/features/services/data/classroom_cache.dart';
 import 'package:neuq_one/features/services/data/school_policies.dart';
@@ -22,6 +26,61 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+
+  testWidgets(
+    'cache categories have space on a narrow screen with large text',
+    (tester) async {
+      tester.view.physicalSize = const Size(320, 640);
+      tester.view.devicePixelRatio = 1;
+      tester.platformDispatcher.textScaleFactorTestValue = 1.8;
+      addTearDown(tester.view.reset);
+      addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+
+      final categories = [
+        CacheCategory.policies,
+        CacheCategory.classrooms,
+        CacheCategory.picker,
+      ];
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            cacheManagerProvider.overrideWithValue(
+              CacheManager({
+                for (final category in categories)
+                  category: (size: () async => 1024, clear: () async {}),
+              }),
+            ),
+          ],
+          child: MaterialApp(
+            theme: appTheme(Brightness.dark),
+            home: const CacheManagementPage(),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final rows = find.byType(ListTile);
+      expect(rows, findsNWidgets(categories.length));
+      for (var index = 0; index < categories.length; index++) {
+        final row = rows.at(index);
+        final label = find.text(categories[index].label);
+        final size = find.descendant(of: row, matching: find.text('1.0 KB'));
+        expect(tester.getTopLeft(size).dy - tester.getBottomLeft(label).dy, 4);
+        if (index > 0) {
+          final gap =
+              tester.getTopLeft(row).dy -
+              tester.getBottomLeft(rows.at(index - 1)).dy;
+          expect(gap, 12);
+        }
+      }
+      final clearAll = find.widgetWithText(FilledButton, '清理全部缓存');
+      expect(
+        tester.getTopLeft(clearAll).dy - tester.getBottomLeft(rows.last).dy,
+        20,
+      );
+      expect(tester.takeException(), isNull);
+    },
+  );
 
   test(
     'temporary file clear preserves an active picker and draft attachments',

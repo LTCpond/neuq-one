@@ -41,21 +41,35 @@ SchoolCasChallenge? schoolCasChallenge(Document page) {
   return null;
 }
 
-bool schoolCasPasswordRejected(Document page) => RegExp(
-  r'密码(?:不正确|错误)|账号或密码|用户名或密码|无效的凭据|invalid credentials',
+final _passwordRejection = RegExp(
+  r'密码\s*(?:(?:输入|填写)\s*)?(?:不正确|不匹配|错误|有误)'
+  r'(?!\s*(?:次数|过多|超过|[0-9０-９一二三四五六七八九十]+\s*次))'
+  r'|(?:无效的?\s*(?:凭据|凭证|认证信息)|(?:凭据|凭证|认证信息)\s*(?:无效|错误|有误))'
+  r'|\b(?:invalid\s+(?:credentials|username\s+or\s+password)|incorrect\s+password)\b',
   caseSensitive: false,
-).hasMatch(_visibleText(page));
+);
 
-String _visibleText(Document page) => page
-    .querySelectorAll('body, body *')
-    .where(
-      (node) =>
+bool schoolCasPasswordRejected(Document page) =>
+    _passwordRejection.hasMatch(_visibleText(page));
+
+String _visibleText(Document page) {
+  final body = page.body;
+  if (body == null || !schoolElementVisible(body)) return '';
+
+  Iterable<String> parts(Node parent) sync* {
+    for (final node in parent.nodes) {
+      if (node is Text) {
+        yield node.data;
+      } else if (node is Element &&
           !const {'script', 'style'}.contains(node.localName) &&
-          schoolElementVisible(node),
-    )
-    .expand((node) => node.nodes.whereType<Text>())
-    .map((node) => node.data)
-    .join(' ');
+          schoolElementVisible(node)) {
+        yield* parts(node);
+      }
+    }
+  }
+
+  return parts(body).join(' ');
+}
 
 class SchoolCasPasswordForm {
   SchoolCasPasswordForm._(this.action, this._salt, this._fields);

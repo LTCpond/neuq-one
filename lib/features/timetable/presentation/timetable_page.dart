@@ -160,13 +160,15 @@ class _TimetablePageState extends ConsumerState<TimetablePage> {
                     icon: Icons.calendar_month_outlined,
                   )
                 : WeekTimetable(
+                    key: ValueKey((
+                      semester.id,
+                      semester.start,
+                      semester.weeks,
+                    )),
                     semester: semester,
                     week: week,
                     today: today,
-                    days: List.generate(
-                      7,
-                      (index) => timetable.on(semester, week, index + 1),
-                    ),
+                    timetable: timetable,
                     onWeekChanged: (value) => setState(() => _week = value),
                     onCourse: (course) => showCourseDetails(
                       context,

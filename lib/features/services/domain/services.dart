@@ -66,7 +66,7 @@ const accessServices = [
 ];
 
 const webVpnService = CampusService.website(
-  '校外远程资源访问系统',
+  'WebVPN',
   Icons.vpn_lock_outlined,
   officialWebVpnUrl,
 );

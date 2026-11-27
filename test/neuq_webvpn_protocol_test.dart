@@ -106,12 +106,21 @@ void main() {
       expect(missing.passwordReads, 1);
       expect(missing.passwordPosts, 0);
 
-      final invalid = _Flow()..posted = _html('<p>密码错误</p>');
+      final invalid = _Flow()
+        ..posted = _html('<p>密码错误</p><input name="captcha">');
       await expectLater(
         invalid.login(),
         throwsA(CampusAccessFailure.invalidCredentials),
       );
       expect(invalid.passwordPosts, 1);
+
+      final challenged = _Flow()
+        ..posted = _html('<p>密码错误次数过多</p><input name="otp">');
+      await expectLater(
+        challenged.login(),
+        throwsA(CampusAccessFailure.verificationRequired),
+      );
+      expect(challenged.passwordPosts, 1);
 
       final rejected = _Flow()..posted = _html('<p>未能登录</p>');
       await expectLater(

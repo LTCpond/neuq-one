@@ -17,6 +17,7 @@ import '../features/services/presentation/school_policies_page.dart';
 import '../features/services/presentation/services_page.dart';
 import '../features/timetable/presentation/timetable_date.dart';
 import '../features/timetable/presentation/timetable_page.dart';
+import 'login_motion.dart';
 import 'login_page.dart';
 
 const _timetablePath = '/timetable';
@@ -33,8 +34,8 @@ const _tabs = [
 ];
 
 final routerProvider = Provider<GoRouter>((ref) {
-  final subject = ref.watch(
-    schoolSessionProvider.select((value) => value.asData?.value?.subject),
+  final sessionSubject = schoolSessionProvider.select(
+    (value) => value.asData?.value?.subject,
   );
   final rootNavigator = GlobalKey<NavigatorState>();
   final rootUpdates = AppUpdateRouteObserver();
@@ -44,6 +45,7 @@ final routerProvider = Provider<GoRouter>((ref) {
     observers: [rootUpdates],
     initialLocation: _timetablePath,
     redirect: (context, state) {
+      final subject = ref.read(sessionSubject);
       final onLogin = state.matchedLocation == '/login';
       if (subject == null || subject.trim().isEmpty) {
         return onLogin ? null : '/login';
@@ -51,14 +53,21 @@ final routerProvider = Provider<GoRouter>((ref) {
       return onLogin ? _timetablePath : null;
     },
     routes: [
-      GoRoute(path: '/login', builder: (context, state) => const LoginPage()),
+      GoRoute(
+        path: '/login',
+        pageBuilder: (context, state) =>
+            _EntryPage(state, const LoginPage(), isLogin: true),
+      ),
       GoRoute(path: '/', redirect: (context, state) => _timetablePath),
       StatefulShellRoute.indexedStack(
         notifyRootObserver: false,
-        builder: (context, state, shell) => AppUpdatePromptHost(
-          root: rootUpdates,
-          branch: branchUpdates[shell.currentIndex],
-          child: _Navigation(shell),
+        pageBuilder: (context, state, shell) => _EntryPage(
+          state,
+          AppUpdatePromptHost(
+            root: rootUpdates,
+            branch: branchUpdates[shell.currentIndex],
+            child: _Navigation(shell),
+          ),
         ),
         branches: [
           for (final (index, tab) in _tabs.indexed)
@@ -111,6 +120,14 @@ final routerProvider = Provider<GoRouter>((ref) {
       ),
     ],
   );
+  ref.listen(sessionSubject, (previous, next) {
+    if (previous != null && previous.trim().isNotEmpty) {
+      // Release all authenticated navigation stacks on logout or account change.
+      ref.invalidateSelf();
+    } else {
+      router.refresh();
+    }
+  });
   ref.onDispose(() {
     router.dispose();
     rootUpdates.dispose();
@@ -120,6 +137,101 @@ final routerProvider = Provider<GoRouter>((ref) {
   });
   return router;
 });
+
+class _EntryPage extends MaterialPage<void> {
+  _EntryPage(GoRouterState state, Widget child, {this.isLogin = false})
+    : super(
+        key: state.pageKey,
+        name: state.name ?? state.path,
+        arguments: {...state.pathParameters, ...state.uri.queryParameters},
+        restorationId: state.pageKey.value,
+        child: _EntryTransition(child: child),
+      );
+
+  final bool isLogin;
+
+  // Reuse the route during sign-in so the login can fade over the new shell.
+  @override
+  bool canUpdate(Page<dynamic> other) =>
+      super.canUpdate(other) ||
+      (!isLogin && other is _EntryPage && other.isLogin);
+}
+
+class _EntryTransition extends StatefulWidget {
+  const _EntryTransition({required this.child});
+
+  final Widget child;
+
+  @override
+  State<_EntryTransition> createState() => _EntryTransitionState();
+}
+
+class _EntryTransitionState extends State<_EntryTransition>
+    with SingleTickerProviderStateMixin {
+  late final _exit =
+      AnimationController(
+        vsync: this,
+        duration: const Duration(milliseconds: 240),
+        animationBehavior: AnimationBehavior.preserve,
+      )..addStatusListener((status) {
+        if (status.isDismissed) setState(() => _outgoingLogin = null);
+      });
+  late final _opacity = _exit.drive(CurveTween(curve: Curves.easeInOut));
+  LoginPage? _outgoingLogin;
+  bool _reduceMotion = false;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _reduceMotion = loginMotionDisabled(context);
+    if (_reduceMotion && _outgoingLogin != null) {
+      _exit.stop();
+      _outgoingLogin = null;
+    }
+  }
+
+  @override
+  void didUpdateWidget(covariant _EntryTransition oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.child case final LoginPage login
+        when !_reduceMotion && widget.child is! LoginPage) {
+      _outgoingLogin = login;
+      _exit.reverse(from: 1);
+    }
+  }
+
+  @override
+  void dispose() {
+    _exit.dispose();
+    super.dispose();
+  }
+
+  Widget _loginSurface(LoginPage login, {required bool exiting}) =>
+      FadeTransition(
+        key: const ValueKey('login surface'),
+        opacity: exiting ? _opacity : const AlwaysStoppedAnimation(1),
+        child: ExcludeFocus(
+          excluding: exiting,
+          child: ExcludeSemantics(
+            excluding: exiting,
+            child: IgnorePointer(ignoring: exiting, child: login),
+          ),
+        ),
+      );
+
+  @override
+  Widget build(BuildContext context) {
+    final child = widget.child;
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        if (child is LoginPage) _loginSurface(child, exiting: false) else child,
+        if (_outgoingLogin case final login?)
+          _loginSurface(login, exiting: true),
+      ],
+    );
+  }
+}
 
 class _Navigation extends ConsumerStatefulWidget {
   const _Navigation(this.shell);

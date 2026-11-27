@@ -6,6 +6,8 @@ import '../../../core/time/neuq_periods.dart';
 import '../domain/timetable.dart';
 import 'timetable_palette.dart';
 
+const _weekHeaderHeight = 54.0;
+
 class WeekMenu extends StatelessWidget {
   const WeekMenu({
     super.key,
@@ -90,13 +92,13 @@ class WeekMenu extends StatelessWidget {
   }
 }
 
-class WeekTimetable extends StatelessWidget {
+class WeekTimetable extends StatefulWidget {
   const WeekTimetable({
     super.key,
     required this.semester,
     required this.week,
     required this.today,
-    required this.days,
+    required this.timetable,
     required this.onWeekChanged,
     required this.onCourse,
     required this.onDate,
@@ -105,99 +107,227 @@ class WeekTimetable extends StatelessWidget {
   final Semester semester;
   final int week;
   final DateTime today;
-  final List<List<Course>> days;
+  final Timetable timetable;
   final ValueChanged<int> onWeekChanged;
   final ValueChanged<Course> onCourse;
   final ValueChanged<DateTime> onDate;
 
-  void _turn(int delta) {
-    final next = week + delta;
-    if (next >= 1 && next <= semester.weeks) onWeekChanged(next);
+  @override
+  State<WeekTimetable> createState() => _WeekTimetableState();
+}
+
+class _WeekTimetableState extends State<WeekTimetable> {
+  late final PageController _controller;
+  final _daysByWeek = <int, List<List<Course>>>{};
+  int? _reportedWeek;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = PageController(initialPage: widget.week - 1, keepPage: false);
+  }
+
+  @override
+  void didUpdateWidget(WeekTimetable oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.timetable != widget.timetable) _daysByWeek.clear();
+    final week = widget.week;
+    if (week == oldWidget.week) return;
+    // The parent also updates its week in response to a settled swipe.
+    final reportedWeek = _reportedWeek;
+    _reportedWeek = null;
+    if (week == reportedWeek) return;
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_controller.hasClients || widget.week != week) return;
+      final target = week - 1;
+      final page = _controller.page;
+      if (page != null &&
+          page != target &&
+          (page.round() - target).abs() <= 1 &&
+          !MediaQuery.disableAnimationsOf(context)) {
+        _controller.animateToPage(
+          target,
+          duration: const Duration(milliseconds: 250),
+          curve: Curves.easeOutCubic,
+        );
+      } else {
+        _controller.jumpToPage(target);
+      }
+    });
+  }
+
+  bool _onScrollEnd(ScrollEndNotification notification) {
+    if (notification.depth != 0) return false;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted ||
+          !_controller.hasClients ||
+          _controller.position.isScrollingNotifier.value) {
+        return;
+      }
+      final page = _controller.page;
+      // Touching a moving page can stop the scroll between page boundaries.
+      if (page == null || page != page.roundToDouble()) return;
+      final week = page.round() + 1;
+      if (week == widget.week || week == _reportedWeek) return;
+      _reportedWeek = week;
+      widget.onWeekChanged(week);
+    });
+    WidgetsBinding.instance.ensureVisualUpdate();
+    return false;
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final start = semester.dateFor(week, DateTime.monday);
-    final end = semester.dateFor(week, DateTime.sunday);
-    final todayInWeek = !today.isBefore(start) && !today.isAfter(end);
+    final semester = widget.semester;
+    final month = semester.dateFor(widget.week, DateTime.monday).month;
     return Card(
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
       clipBehavior: Clip.antiAlias,
-      child: Column(
-        children: [
-          if (days.every((day) => day.isEmpty))
-            Padding(
-              padding: const EdgeInsets.only(bottom: 8),
-              child: Text('本周暂无课程', style: theme.textTheme.labelMedium),
-            ),
-          MediaQuery.withClampedTextScaling(
-            maxScaleFactor: 1.3,
-            child: GestureDetector(
-              behavior: HitTestBehavior.opaque,
-              onHorizontalDragEnd: (details) {
-                final velocity = details.primaryVelocity ?? 0;
-                if (velocity.abs() > 180) _turn(velocity < 0 ? 1 : -1);
-              },
-              child: LayoutBuilder(
-                builder: (context, constraints) {
-                  final rail = constraints.maxWidth < 340 ? 33.0 : 38.0;
-                  final rowHeight =
-                      ((MediaQuery.sizeOf(context).height - 220) / 10).clamp(
-                        52.0,
-                        72.0,
-                      );
-                  return Padding(
-                    padding: const EdgeInsets.only(right: 4),
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+      child: MediaQuery.withClampedTextScaling(
+        maxScaleFactor: 1.3,
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final rail = constraints.maxWidth < 340 ? 33.0 : 38.0;
+            final rowHeight = ((MediaQuery.sizeOf(context).height - 220) / 10)
+                .clamp(52.0, 72.0);
+            return Padding(
+              padding: const EdgeInsets.only(right: 4, bottom: 4),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  SizedBox(
+                    width: rail,
+                    child: Column(
                       children: [
                         SizedBox(
-                          width: rail,
-                          child: Column(
-                            children: [
-                              SizedBox(
-                                height: 54,
-                                child: Center(
-                                  child: Text(
-                                    '${start.month}月',
-                                    style: TextStyle(
-                                      fontSize: 10,
-                                      color: theme.colorScheme.onSurfaceVariant,
-                                    ),
-                                  ),
-                                ),
+                          height: _weekHeaderHeight,
+                          child: Center(
+                            child: Text(
+                              '$month月',
+                              style: TextStyle(
+                                fontSize: 10,
+                                color: theme.colorScheme.onSurfaceVariant,
                               ),
-                              for (final (index, period) in neuqPeriods.indexed)
-                                _PeriodNumber(
-                                  period: index + 1,
-                                  start: period.start,
-                                  end: period.end,
-                                  height: rowHeight,
-                                ),
-                            ],
+                            ),
                           ),
                         ),
-                        for (final (index, courses) in days.indexed)
-                          Expanded(
-                            child: _DayColumn(
-                              date: start.add(Duration(days: index)),
-                              current:
-                                  todayInWeek && today.weekday == index + 1,
-                              height: rowHeight,
-                              courses: courses,
-                              onDate: onDate,
-                              onCourse: onCourse,
-                            ),
+                        for (final (index, period) in neuqPeriods.indexed)
+                          _PeriodNumber(
+                            period: index + 1,
+                            start: period.start,
+                            end: period.end,
+                            height: rowHeight,
                           ),
                       ],
                     ),
-                  );
-                },
+                  ),
+                  Expanded(
+                    child: SizedBox(
+                      height:
+                          _weekHeaderHeight + rowHeight * neuqPeriods.length,
+                      child: NotificationListener<ScrollEndNotification>(
+                        onNotification: _onScrollEnd,
+                        child: PageView.builder(
+                          controller: _controller,
+                          itemCount: semester.weeks,
+                          itemBuilder: (context, index) {
+                            final week = index + 1;
+                            final days = _daysByWeek.putIfAbsent(
+                              week,
+                              () => List.generate(
+                                DateTime.daysPerWeek,
+                                (day) => widget.timetable.on(
+                                  semester,
+                                  week,
+                                  day + 1,
+                                ),
+                              ),
+                            );
+                            return _WeekGrid(
+                              start: semester.dateFor(week, DateTime.monday),
+                              today: widget.today,
+                              height: rowHeight,
+                              days: days,
+                              onDate: widget.onDate,
+                              onCourse: widget.onCourse,
+                            );
+                          },
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        ),
+      ),
+    );
+  }
+}
+
+class _WeekGrid extends StatelessWidget {
+  const _WeekGrid({
+    required this.start,
+    required this.today,
+    required this.height,
+    required this.days,
+    required this.onDate,
+    required this.onCourse,
+  });
+
+  final DateTime start;
+  final DateTime today;
+  final double height;
+  final List<List<Course>> days;
+  final ValueChanged<DateTime> onDate;
+  final ValueChanged<Course> onCourse;
+
+  @override
+  Widget build(BuildContext context) {
+    final todayInWeek = mondayOf(today) == start;
+    return Material(
+      type: MaterialType.transparency,
+      child: Stack(
+        children: [
+          Row(
+            children: [
+              for (final (index, courses) in days.indexed)
+                Expanded(
+                  child: _DayColumn(
+                    date: start.add(Duration(days: index)),
+                    current: todayInWeek && today.weekday == index + 1,
+                    height: height,
+                    courses: courses,
+                    onDate: onDate,
+                    onCourse: onCourse,
+                  ),
+                ),
+            ],
+          ),
+          if (days.every((day) => day.isEmpty))
+            Positioned(
+              top: _weekHeaderHeight,
+              left: 0,
+              right: 0,
+              height: height,
+              child: IgnorePointer(
+                child: Center(
+                  child: Text(
+                    '本周暂无课程',
+                    style: Theme.of(context).textTheme.labelMedium,
+                  ),
+                ),
               ),
             ),
-          ),
-          const SizedBox(height: 4),
         ],
       ),
     );
@@ -293,7 +423,7 @@ class _DayColumn extends StatelessWidget {
             key: ValueKey(date),
             onTap: () => onDate(date),
             child: SizedBox(
-              height: 54,
+              height: _weekHeaderHeight,
               width: double.infinity,
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,

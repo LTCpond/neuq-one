@@ -665,11 +665,11 @@ class NeuqSession {
     checkActive();
     if (isAcademicCasLogin(result.uri)) {
       final returned = html.parse(result.body);
-      _checkChallenge(returned);
       if (schoolCasPasswordRejected(returned)) {
         throw SchoolRequestFailure.invalidCredentials;
       }
-      throw SchoolRequestFailure.verificationRequired;
+      _checkChallenge(returned);
+      throw SchoolRequestFailure.unsupportedLogin;
     }
     return _verifiedSubject(result, checkActive);
   }

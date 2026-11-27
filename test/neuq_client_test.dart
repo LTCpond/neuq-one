@@ -659,6 +659,41 @@ void main() {
   );
 
   test(
+    'CAS return distinguishes password rejection from verification',
+    () async {
+      final cases = [
+        (
+          '<p>您输入的账号或密码 <strong>有误</strong>。</p>'
+              '<input name="needCaptcha" type="hidden" value="true">',
+          SchoolRequestFailure.invalidCredentials,
+        ),
+        ('<p>您提供的凭证无效。</p>', SchoolRequestFailure.invalidCredentials),
+        ('<p>Incorrect password.</p>', SchoolRequestFailure.invalidCredentials),
+        (
+          '<p hidden>密码错误</p><p>请拖动下方滑块</p>',
+          SchoolRequestFailure.verificationRequired,
+        ),
+        (
+          '<p>密码错误次数过多，请完成验证。</p><input name="otp">',
+          SchoolRequestFailure.verificationRequired,
+        ),
+        ('<p>请输入用户名或密码。</p>', SchoolRequestFailure.unsupportedLogin),
+      ];
+      for (final (body, failure) in cases) {
+        school.loginResponse = body;
+        await expectLater(
+          client.signIn(
+            _account,
+            onVerified: (_) async => fail('Unexpected login'),
+          ),
+          throwsA(failure),
+        );
+      }
+      expect(school.loginAttempts, cases.length);
+    },
+  );
+
+  test(
     'an account mismatch is never recorded and logout clears active access',
     () async {
       school.returnedCode = '00005678';
@@ -783,6 +818,7 @@ class _School {
   Uri? cardReturn;
   bool challenge = false;
   bool invalidPassword = false;
+  String? loginResponse;
   Future<http.Response?> Function(http.Request)? intercept;
   String returnedCode = _account.username;
   String formAction = '/authserver/login';
@@ -865,6 +901,7 @@ class _School {
       final decrypted = cipher.process(base64Decode(encrypted));
       expect(utf8.decode(decrypted.skip(64).toList()), _account.password);
       loginAttempts++;
+      if (loginResponse case final body?) return reply(body);
       if (invalidPassword) return reply('密码错误');
       return http.Response(
         '',

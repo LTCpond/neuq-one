@@ -50,30 +50,43 @@ class _CacheManagementPageState extends ConsumerState<CacheManagementPage> {
   @override
   Widget build(BuildContext context) => Scaffold(
     appBar: AppBar(title: const Text('缓存管理')),
-    body: ListView(
-      padding: const EdgeInsets.all(16),
-      children: [
-        if (_busy) const LinearProgressIndicator(semanticsLabel: '正在处理缓存'),
-        for (final entry
-            in _sizes?.entries ?? const <MapEntry<CacheCategory, int?>>[])
-          Card(
-            child: ListTile(
-              title: Text(entry.key.label),
-              subtitle: Text(_sizeLabel(entry.value)),
-              trailing: TextButton(
-                onPressed: _busy ? null : () => _clear(entry.key),
-                child: const Text('清理'),
+    body: SafeArea(
+      top: false,
+      child: ListView(
+        padding: const EdgeInsets.all(16),
+        children: [
+          if (_busy)
+            const Padding(
+              padding: EdgeInsets.only(bottom: 12),
+              child: LinearProgressIndicator(semanticsLabel: '正在处理缓存'),
+            ),
+          for (final entry
+              in _sizes?.entries ?? const <MapEntry<CacheCategory, int?>>[])
+            Card(
+              margin: const EdgeInsets.only(bottom: 12),
+              child: ListTile(
+                minTileHeight: 72,
+                minVerticalPadding: 12,
+                title: Text(entry.key.label),
+                subtitle: Padding(
+                  padding: const EdgeInsets.only(top: 4),
+                  child: Text(_sizeLabel(entry.value)),
+                ),
+                trailing: TextButton(
+                  onPressed: _busy ? null : () => _clear(entry.key),
+                  child: const Text('清理'),
+                ),
               ),
             ),
-          ),
-        if (_sizes != null) ...[
-          const SizedBox(height: 8),
-          FilledButton(
-            onPressed: _busy ? null : () => _clear(),
-            child: const Text('清理全部缓存'),
-          ),
+          if (_sizes != null) ...[
+            const SizedBox(height: 8),
+            FilledButton(
+              onPressed: _busy ? null : () => _clear(),
+              child: const Text('清理全部缓存'),
+            ),
+          ],
         ],
-      ],
+      ),
     ),
   );
 }

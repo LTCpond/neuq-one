@@ -146,6 +146,9 @@ class NeuqWebVpnProtocol implements WebVpnProtocol {
       }
 
       final page = await _html(response, attempt.cancellation);
+      if (isCas && submitted && schoolCasPasswordRejected(page)) {
+        throw CampusAccessFailure.invalidCredentials;
+      }
       switch (schoolCasChallenge(page)) {
         case SchoolCasChallenge.captcha:
           throw CampusAccessFailure.captchaRequired;
@@ -155,9 +158,6 @@ class NeuqWebVpnProtocol implements WebVpnProtocol {
           throw CampusAccessFailure.verificationRequired;
         case null:
           break;
-      }
-      if (isCas && submitted && schoolCasPasswordRejected(page)) {
-        throw CampusAccessFailure.invalidCredentials;
       }
       if (status == 401 || status == 403) {
         throw CampusAccessFailure.unauthorized;

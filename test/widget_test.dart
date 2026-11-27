@@ -12,6 +12,7 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:neuq_one/app/app.dart';
+import 'package:neuq_one/app/login_motion.dart';
 import 'package:neuq_one/app/login_page.dart';
 import 'package:neuq_one/app/router.dart';
 import 'package:neuq_one/core/auth/school_auth.dart';
@@ -21,6 +22,7 @@ import 'package:neuq_one/core/network/campus_access/campus_access_providers.dart
 import 'package:neuq_one/core/network/campus_access/webvpn_session_manager.dart';
 import 'package:neuq_one/core/storage/settings.dart';
 import 'package:neuq_one/core/network/public_data_client.dart';
+import 'package:neuq_one/core/theme/app_theme.dart';
 import 'package:neuq_one/core/time/campus_clock.dart';
 import 'package:neuq_one/core/time/neuq_periods.dart';
 import 'package:neuq_one/features/exams/data/local_exams.dart';
@@ -67,11 +69,11 @@ void main() {
         matching: find.byType(Scrollable),
       );
       await tester.scrollUntilVisible(
-        find.text('校外远程资源访问系统'),
+        find.text('WebVPN'),
         240,
         scrollable: services,
       );
-      expect(find.text('校外远程资源访问系统'), findsOneWidget);
+      expect(find.text('WebVPN'), findsOneWidget);
       _router(tester).push<void>('/services/classrooms');
       await tester.pumpAndSettle();
       expect(find.byType(ClassroomsPage), findsOneWidget);
@@ -109,15 +111,160 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(find.text('此平台暂不支持应用内登录'), findsOneWidget);
+    expect(find.text('打开学校门户'), findsOneWidget);
     expect(find.byType(NavigationBar), findsNothing);
     final container = ProviderScope.containerOf(
-      tester.element(find.text('NEUQ One')),
+      tester.element(find.byType(LoginPage)),
     );
     container.read(routerProvider).go('/services/classrooms');
     await tester.pumpAndSettle();
     expect(find.text('此平台暂不支持应用内登录'), findsOneWidget);
     expect(find.byType(ClassroomsPage), findsNothing);
   });
+
+  testWidgets('login layout follows the theme and skips reduced motion', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(390, 844);
+    tester.platformDispatcher.accessibilityFeaturesTestValue =
+        const FakeAccessibilityFeatures(reduceMotion: true);
+    tester.platformDispatcher.platformBrightnessTestValue = Brightness.light;
+    addTearDown(tester.view.reset);
+    addTearDown(tester.platformDispatcher.clearAccessibilityFeaturesTestValue);
+    addTearDown(tester.platformDispatcher.clearPlatformBrightnessTestValue);
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          schoolAuthRepositoryProvider.overrideWithValue(
+            const _TestAuth(restore: false),
+          ),
+        ],
+        child: MaterialApp(
+          theme: appTheme(Brightness.light),
+          darkTheme: appTheme(Brightness.dark),
+          home: const LoginPage(),
+        ),
+      ),
+    );
+    for (final reveal in tester.widgetList<LoginReveal>(
+      find.byType(LoginReveal),
+    )) {
+      expect(reveal.progress.value, 1);
+    }
+    await tester.pumpAndSettle();
+    expect(find.text('校园一站式服务平台'), findsNothing);
+    final title = find.text('统一身份认证');
+    final brand = find.text('NEUQ');
+    final button = find.widgetWithText(FilledButton, '统一身份认证登录');
+    final input = find.byType(TextFormField).first;
+    expect(tester.getTopLeft(brand).dx, tester.getTopLeft(title).dx);
+    expect(tester.getTopLeft(input).dx, tester.getTopLeft(title).dx);
+    expect(tester.getSize(input).height, inInclusiveRange(54, 56));
+    expect(tester.getSize(button).width, tester.getSize(input).width);
+    final formCenter =
+        (tester.getTopLeft(title).dy + tester.getBottomLeft(button).dy) / 2;
+    expect(formCenter, closeTo(422, 32));
+    final lightRect = tester.getRect(input);
+    expect(
+      tester.widget<Scaffold>(find.byType(Scaffold)).backgroundColor,
+      Colors.white,
+    );
+    expect(tester.widget<Text>(brand).style?.color, campusBlue);
+
+    tester.platformDispatcher.platformBrightnessTestValue = Brightness.dark;
+    await tester.pumpAndSettle();
+    final dark = appTheme(Brightness.dark);
+    expect(
+      tester.widget<Scaffold>(find.byType(Scaffold)).backgroundColor,
+      dark.scaffoldBackgroundColor,
+    );
+    expect(tester.widget<Text>(brand).style?.color, dark.colorScheme.primary);
+    expect(tester.getRect(input), lightRect);
+
+    tester.view.physicalSize = const Size(1080, 900);
+    await tester.pumpAndSettle();
+    expect(tester.getSize(input).width, 400);
+  });
+
+  _appTest(
+    'the compact login keeps controls reachable with the keyboard open',
+    (tester) async {
+      tester.view.devicePixelRatio = 1;
+      tester.view.physicalSize = const Size(320, 520);
+      tester.platformDispatcher.textScaleFactorTestValue = 1.5;
+      addTearDown(tester.view.reset);
+      addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+      await tester.pumpAndSettle();
+      final inputs = find.byType(EditableText);
+      await tester.enterText(inputs.first, '00001234');
+      tester.view.viewInsets = const FakeViewPadding(bottom: 260);
+      await tester.testTextInput.receiveAction(TextInputAction.next);
+      await tester.pumpAndSettle();
+      expect(
+        tester.widget<EditableText>(inputs.last).focusNode.hasFocus,
+        isTrue,
+      );
+      final button = find.widgetWithText(FilledButton, '统一身份认证登录');
+      await tester.ensureVisible(button);
+      await tester.pumpAndSettle();
+      expect(button.hitTestable(), findsOneWidget);
+      expect(tester.getBottomLeft(button).dy, lessThanOrEqualTo(260));
+      expect(tester.takeException(), isNull);
+    },
+    auth: const _TestAuth(restore: false),
+  );
+
+  late Completer<SchoolSession> pendingLogin;
+  var loginAttempts = 0;
+  _appTest(
+    'login toggles password visibility, loads in place, and exposes the official fallback',
+    (tester) async {
+      pendingLogin = Completer<SchoolSession>();
+      final inputs = find.byType(EditableText);
+      final button = find.widgetWithText(FilledButton, '统一身份认证登录');
+      final size = tester.getSize(button);
+      expect(find.byType(CheckboxListTile), findsNothing);
+      expect(tester.widget<EditableText>(inputs.last).obscureText, isTrue);
+      await tester.enterText(inputs.first, '00001234');
+      await tester.enterText(inputs.last, 'test-password');
+      await tester.tap(find.byTooltip('显示密码'));
+      await tester.pumpAndSettle();
+      expect(tester.widget<EditableText>(inputs.last).obscureText, isFalse);
+      await tester.tap(find.byTooltip('隐藏密码'));
+      await tester.pumpAndSettle();
+      expect(tester.widget<EditableText>(inputs.last).obscureText, isTrue);
+      await tester.testTextInput.receiveAction(TextInputAction.done);
+      await tester.pump();
+      expect(tester.getSize(button), size);
+      expect(find.byType(CircularProgressIndicator), findsOneWidget);
+      expect(find.byType(LinearProgressIndicator), findsNothing);
+      expect(tester.widget<FilledButton>(button).onPressed, isNull);
+      await tester.tap(button);
+      expect(loginAttempts, 1);
+      pendingLogin.completeError(SchoolRequestFailure.verificationRequired);
+      await tester.pumpAndSettle();
+      expect(
+        find.text(SchoolRequestFailure.verificationRequired.message),
+        findsOneWidget,
+      );
+      expect(find.text('在系统浏览器打开教务'), findsOneWidget);
+      expect(
+        tester.widget<EditableText>(inputs.first).controller.text,
+        '00001234',
+      );
+      expect(tester.widget<EditableText>(inputs.last).controller.text, isEmpty);
+    },
+    auth: _TestAuth(
+      restore: false,
+      canRememberPassword: false,
+      onSignIn: () {
+        loginAttempts++;
+        return pendingLogin.future;
+      },
+    ),
+  );
 
   final loginAuth = _RememberingTestAuth(restore: false);
   _appTest('logout waits for saved credentials to be deleted', (tester) async {
@@ -130,7 +277,13 @@ void main() {
     await tester.enterText(find.byType(TextFormField).at(0), '00001234');
     await tester.enterText(find.byType(TextFormField).at(1), 'test-password');
     await tester.tap(find.text('统一身份认证登录'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 120));
+    expect(find.byType(NavigationBar), findsOneWidget);
+    expect(find.byType(LoginPage), findsOneWidget);
+    expect(find.byType(TextFormField).hitTestable(), findsNothing);
     await tester.pumpAndSettle();
+    expect(find.byType(LoginPage), findsNothing);
     expect(find.byType(NavigationBar), findsOneWidget);
     expect(
       _router(tester).routeInformationProvider.value.uri.path,
@@ -159,6 +312,8 @@ void main() {
     'profile shows identity status, credential removal and the privacy notice',
     (tester) async {
       await _tab(tester, '我的');
+      expect(find.text('偏好设置'), findsOneWidget);
+      expect(find.text('WebVPN'), findsNothing);
       final status = find.text('学校身份已验证');
       final statusTile = find.ancestor(
         of: status,
@@ -1075,6 +1230,218 @@ void main() {
     ),
   );
 
+  final pagingTerm = Semester(
+    id: 'paging',
+    name: '分页学期',
+    start: DateTime.utc(2026, 8, 24),
+    weeks: 6,
+  );
+  final shortTerm = Semester(
+    id: 'short',
+    name: '较短学期',
+    start: DateTime.utc(2026, 4, 6),
+    weeks: 2,
+  );
+  final pagingTimetable = Timetable(
+    [pagingTerm, shortTerm],
+    [_sampleCourse('paging', '分页测试课程', pagingTerm, DateTime.monday, 1, 2)],
+  );
+  final pagingRefreshes = <SchoolDataSet>[];
+
+  _appTest(
+    'timetable pages follow a slow drag, settle, and handle quick swipes and edges',
+    (tester) async {
+      final pager = find.byType(PageView);
+      final controller = tester.widget<PageView>(pager).controller!;
+      final viewport = tester.getRect(pager);
+      final rail = find.byKey(const ValueKey('timetable-period-1'));
+      final railBounds = tester.getRect(rail);
+      final card = find.descendant(
+        of: find.byType(WeekTimetable),
+        matching: find.byType(Card),
+      );
+      final cardBounds = tester.getRect(card);
+      final headerBounds = tester.getRect(find.byType(AppBar));
+      final navBounds = tester.getRect(find.byType(NavigationBar));
+      final currentDate = find.byKey(ValueKey(DateTime.utc(2026, 9, 1)));
+      final initialDateX = tester.getTopLeft(currentDate).dx;
+      final course = find.byKey(const ValueKey('timetable-course-paging'));
+      final initialCourseX = tester.getTopLeft(course).dx;
+      final nextMonday = find.byKey(ValueKey(DateTime.utc(2026, 9, 7)));
+      final initialRefreshes = pagingRefreshes.length;
+      expect(controller.page, 1);
+      expect(find.text('8月31日 – 9月6日'), findsOneWidget);
+      expect(find.text('8月'), findsOneWidget);
+      expect(nextMonday, findsNothing);
+
+      final drag = await tester.startGesture(
+        viewport.centerRight - const Offset(12, 0),
+      );
+      for (var step = 1; step <= 8; step++) {
+        final time = Duration(milliseconds: 200 * step);
+        await drag.moveBy(Offset(-viewport.width * .09, 0), timeStamp: time);
+        await tester.pump(const Duration(milliseconds: 200));
+      }
+      expect(controller.page, inExclusiveRange(1.5, 1.8));
+      final displacement = (controller.page! - 1) * viewport.width;
+      expect(
+        tester.getTopLeft(currentDate).dx,
+        closeTo(initialDateX - displacement, 1),
+      );
+      expect(
+        tester.getTopLeft(course).dx,
+        closeTo(initialCourseX - displacement, 1),
+      );
+      expect(
+        tester.getTopLeft(nextMonday).dx,
+        inExclusiveRange(viewport.left, viewport.right),
+      );
+      expect(tester.getRect(rail), railBounds);
+      expect(tester.getRect(card), cardBounds);
+      expect(tester.getRect(find.byType(AppBar)), headerBounds);
+      expect(tester.getRect(find.byType(NavigationBar)), navBounds);
+      expect(find.text('第 2 周'), findsOneWidget);
+      expect(find.text('8月'), findsOneWidget);
+
+      await drag.up(timeStamp: const Duration(seconds: 2));
+      await tester.pumpAndSettle();
+      expect(controller.page, 2);
+      expect(find.text('第 3 周'), findsOneWidget);
+      expect(find.text('9月7日 – 9月13日'), findsOneWidget);
+      expect(find.text('9月'), findsOneWidget);
+      expect(tester.getRect(card), cardBounds);
+      expect(tester.getRect(rail), railBounds);
+      expect(find.text('本周暂无课程'), findsOneWidget);
+      for (var day = 0; day < DateTime.daysPerWeek; day++) {
+        expect(
+          find.byKey(ValueKey(DateTime.utc(2026, 9, 7 + day))),
+          findsOneWidget,
+        );
+      }
+      await tester.tap(nextMonday);
+      await tester.pumpAndSettle();
+      expect(find.text('当天没有课程'), findsOneWidget);
+      _router(tester).pop();
+      await tester.pumpAndSettle();
+
+      await tester.timedDragFrom(
+        viewport.center,
+        Offset(viewport.width * .22, 0),
+        const Duration(seconds: 1),
+      );
+      await tester.pumpAndSettle();
+      expect(controller.page, 2);
+      expect(find.text('第 3 周'), findsOneWidget);
+
+      Future<void> fling(int direction, {double distance = .28}) =>
+          tester.flingFrom(
+            viewport.center,
+            Offset(viewport.width * distance * direction, 0),
+            2000,
+          );
+      await fling(1);
+      await tester.pumpAndSettle();
+      expect(controller.page, 1);
+      expect(find.text('第 2 周'), findsOneWidget);
+      expect(course, findsOneWidget);
+
+      await fling(-1);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 185));
+      expect(controller.page, inExclusiveRange(1.75, 2));
+      expect(find.text('第 2 周'), findsOneWidget);
+      await fling(-1, distance: .43);
+      await tester.pumpAndSettle();
+      expect(controller.page, 3);
+      expect(find.text('第 4 周'), findsOneWidget);
+
+      for (var week = 5; week <= 7; week++) {
+        await fling(-1);
+        await tester.pumpAndSettle();
+        expect(controller.page, (week - 1).clamp(0, 5));
+      }
+      expect(find.text('第 6 周'), findsOneWidget);
+      await _selectTimetableWeek(tester, 1);
+      await tester.pumpAndSettle();
+      await fling(1);
+      await tester.pumpAndSettle();
+      expect(controller.page, 0);
+      expect(find.text('第 1 周'), findsOneWidget);
+      expect(pagingRefreshes, hasLength(initialRefreshes));
+
+      await tester.dragFrom(viewport.center, const Offset(0, -120));
+      await tester.pumpAndSettle();
+      expect(tester.getTopLeft(rail).dy, lessThan(railBounds.top));
+      expect(controller.page, 0);
+      expect(tester.takeException(), isNull);
+    },
+    initialTimetable: pagingTimetable,
+    timetableClock: () => DateTime.utc(2026, 9, 1),
+    onRefresh: pagingRefreshes.add,
+  );
+
+  _appTest(
+    'week menu animates adjacent weeks, jumps distant weeks, and resets for a new semester',
+    (tester) async {
+      PageController controller() =>
+          tester.widget<PageView>(find.byType(PageView)).controller!;
+      final initialController = controller();
+      await _selectTimetableWeek(tester, 3);
+      await tester.pump();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
+      expect(controller().page, inExclusiveRange(1, 2));
+      await tester.pumpAndSettle();
+      expect(controller().page, 2);
+
+      await _selectTimetableWeek(tester, 6);
+      await tester.pump();
+      expect(controller().page, 5);
+      await tester.pumpAndSettle();
+      expect(find.text('第 6 周'), findsOneWidget);
+
+      await tester.tap(find.byTooltip('选择学期'));
+      await tester.pumpAndSettle();
+      await tester.tap(
+        find.widgetWithText(CheckedPopupMenuItem<String>, shortTerm.name),
+      );
+      await tester.pumpAndSettle();
+      expect(controller(), isNot(same(initialController)));
+      expect(controller().page, 0);
+      expect(find.text('第 1 周'), findsOneWidget);
+      expect(find.text('4月6日 – 4月12日'), findsOneWidget);
+      await tester.tap(find.byTooltip('选择教学周'));
+      await tester.pumpAndSettle();
+      expect(find.byType(PopupMenuItem<int>), findsNWidgets(shortTerm.weeks));
+      await tester.tap(find.widgetWithText(PopupMenuItem<int>, '第 2 周'));
+      await tester.pumpAndSettle();
+      expect(controller().page, 1);
+
+      await tester.tap(find.byTooltip('课表选项'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('回到本周'));
+      await tester.pumpAndSettle();
+      expect(controller().page, 1);
+      expect(find.text('8月31日 – 9月6日'), findsOneWidget);
+      expect(find.text('分页测试课程'), findsOneWidget);
+
+      tester.platformDispatcher.accessibilityFeaturesTestValue =
+          const FakeAccessibilityFeatures(disableAnimations: true);
+      addTearDown(
+        tester.platformDispatcher.clearAccessibilityFeaturesTestValue,
+      );
+      await tester.pumpAndSettle();
+      await _selectTimetableWeek(tester, 3);
+      await tester.pump();
+      expect(controller().page, 2);
+      await tester.pumpAndSettle();
+      expect(find.text('第 3 周'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    },
+    initialTimetable: pagingTimetable,
+    timetableClock: () => DateTime.utc(2026, 9, 1),
+  );
+
   _appTest('manual grade contributes to GPA', (tester) async {
     await _tab(tester, '学业');
     await _createSemester(tester);
@@ -1894,6 +2261,12 @@ Future<void> _tab(WidgetTester tester, String title) async {
   await tester.pumpAndSettle();
 }
 
+Future<void> _selectTimetableWeek(WidgetTester tester, int week) async {
+  await tester.tap(find.byTooltip('选择教学周'));
+  await tester.pumpAndSettle();
+  await tester.tap(find.widgetWithText(PopupMenuItem<int>, '第 $week 周'));
+}
+
 GoRouter _router(WidgetTester tester) =>
     ProviderScope.containerOf(tester.element(find.byType(NavigationBar)))
         .read(routerProvider);
@@ -1929,15 +2302,22 @@ Future<void> _createSemester(WidgetTester tester) async {
 }
 
 class _TestAuth implements SchoolAuthRepository {
-  const _TestAuth({this.restore = true, this.restoration, this.onRecovery});
+  const _TestAuth({
+    this.restore = true,
+    this.restoration,
+    this.onRecovery,
+    this.canRememberPassword = true,
+    this.onSignIn,
+  });
   final bool restore;
   final Future<SchoolSession?> Function()? restoration;
   final Future<bool> Function(SchoolRecoveryTrigger)? onRecovery;
+  final Future<SchoolSession> Function()? onSignIn;
 
   @override
   bool get available => true;
   @override
-  bool get canRememberPassword => true;
+  final bool canRememberPassword;
   @override
   Future<void> disconnect() async {}
   @override
@@ -1962,7 +2342,7 @@ class _TestAuth implements SchoolAuthRepository {
     NeuqCredentials credentials, {
     required bool rememberPassword,
     String? expectedSubject,
-  }) async => _session;
+  }) async => await onSignIn?.call() ?? _session;
 
   static const _session = SchoolSession(
     subject: 'test-owner',
