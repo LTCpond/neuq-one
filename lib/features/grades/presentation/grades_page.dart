@@ -1,5 +1,6 @@
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:uuid/uuid.dart';
 
 import '../../../app/school_reconnect_button.dart';
@@ -116,6 +117,19 @@ class _GradesPageState extends ConsumerState<GradesPage> {
             cacheError: cache.hasError,
             compactSuccessLabel: '教务成绩 · 已同步',
             reconnect: const SchoolReconnectButton(),
+          ),
+          const SizedBox(height: 10),
+          Card(
+            child: ListTile(
+              leading: CampusIconBadge(
+                background: Theme.of(context).colorScheme.primaryContainer,
+                foreground: Theme.of(context).colorScheme.onPrimaryContainer,
+                child: const Icon(Icons.checklist_rounded),
+              ),
+              title: const Text('培养方案完成情况'),
+              trailing: const Icon(Icons.chevron_right_rounded),
+              onTap: () => context.push<void>('/grades/plan-completion'),
+            ),
           ),
           const SizedBox(height: 10),
           DataPanel(

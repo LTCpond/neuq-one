@@ -2,12 +2,18 @@ import 'dart:async';
 
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:neuq_one/core/auth/neuq_login_protocol.dart';
+import 'package:neuq_one/core/auth/school_auth.dart';
 import 'package:neuq_one/core/database/app_database.dart';
 import 'package:neuq_one/core/database/school_data.dart';
 import 'package:neuq_one/core/time/neuq_periods.dart';
 import 'package:neuq_one/features/grades/data/local_grades.dart';
+import 'package:neuq_one/features/grades/data/neuq_plan_completion.dart';
 import 'package:neuq_one/features/grades/domain/grades.dart';
+import 'package:neuq_one/features/grades/domain/plan_completion.dart';
 import 'package:neuq_one/features/timetable/domain/timetable.dart';
+
+import 'fixtures/plan_completion.dart';
 
 void main() {
   test('published periods cover all twelve teaching slots and breaks', () {
@@ -115,6 +121,32 @@ void main() {
       expect((await repo.watchGrades().first)!.data.grades, isEmpty);
     },
   );
+
+  test('failed plan refresh keeps the last report and its timestamp', () async {
+    final db = AppDatabase(NativeDatabase.memory());
+    addTearDown(db.close);
+    final repository = SchoolDataRepository(db);
+    final source = _TestSchoolSource();
+    final report = readNeuqPlanCompletion(
+      planCompletionHtml,
+      schoolSubjectForStudentCode(planFixtureStudent)!,
+    );
+    source.planReply.complete(report);
+    await repository.refresh(SchoolDataSet.planCompletion, source);
+    final first = (await repository.watchPlanCompletion().first)!;
+
+    source.planReply = Completer();
+    final failed = expectLater(
+      repository.refresh(SchoolDataSet.planCompletion, source),
+      throwsA(SchoolRequestFailure.unavailable),
+    );
+    source.planReply.completeError(SchoolRequestFailure.unavailable);
+    await failed;
+    final retained = (await repository.watchPlanCompletion().first)!;
+    expect(retained.data.toJson(), report.toJson());
+    expect(retained.syncedAt, first.syncedAt);
+    expect(await repository.watchGrades().first, isNull);
+  });
 }
 
 Grade _grade(
@@ -142,6 +174,7 @@ class _TestSchoolSource implements SchoolDataSource {
   );
   int requests = 0;
   Completer<SchoolGradeBook> reply = Completer();
+  Completer<PlanCompletion> planReply = Completer();
 
   @override
   Future<SchoolGradeBook> fetchGrades() {
@@ -151,4 +184,7 @@ class _TestSchoolSource implements SchoolDataSource {
 
   @override
   Future<Timetable> fetchTimetable() async => const Timetable([], []);
+
+  @override
+  Future<PlanCompletion> fetchPlanCompletion() => planReply.future;
 }

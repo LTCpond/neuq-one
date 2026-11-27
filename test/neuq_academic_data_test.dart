@@ -1,8 +1,12 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:neuq_one/core/auth/neuq_login_protocol.dart';
 import 'package:neuq_one/core/network/neuq_client.dart';
 import 'package:neuq_one/core/time/neuq_periods.dart';
 import 'package:neuq_one/features/grades/data/neuq_grades.dart';
+import 'package:neuq_one/features/grades/data/neuq_plan_completion.dart';
 import 'package:neuq_one/features/timetable/data/neuq_timetable.dart';
+
+import 'fixtures/plan_completion.dart';
 
 const _entry = '''
 <select id="semesterBar7Semester"></select>
@@ -128,5 +132,41 @@ index = 0 * unitCount + 9;
     expect(NeuqPage.schedule.requestUri().queryParameters, {
       'sf_request_type': 'ajax',
     });
+  });
+
+  test(
+    'plan report keeps official totals, group audit and outside courses',
+    () {
+      final subject = schoolSubjectForStudentCode(planFixtureStudent)!;
+      final report = readNeuqPlanCompletion(planCompletionHtml, subject);
+      expect(report.credits.toJson(), {'required': 12.5, 'completed': 8.5});
+      expect(report.compulsoryCourses.completed, 2);
+      expect(report.internalGpa, 3.8125);
+      expect(report.groups.map((group) => group.name), ['通识类课程', '科学基础']);
+      final group = report.groups.last;
+      expect(group.isSubgroup, isTrue);
+      expect(group.result, '缺1.5分 缺1门');
+      expect(group.courses.first.remark, '替代课程：示例基础');
+      expect(group.courses[1].score, isNull);
+      expect(group.courses[1].passed, isTrue);
+      expect(group.courses.last.passed, isFalse);
+      expect(report.extraCourses.single.semester, isNull);
+      expect(report.extraCourses.single.score, '合格');
+    },
+  );
+
+  test('plan report rejects an unrelated page and another school account', () {
+    final subject = schoolSubjectForStudentCode(planFixtureStudent)!;
+    expect(
+      () => readNeuqPlanCompletion('<p>系统提示</p>', subject),
+      throwsFormatException,
+    );
+    expect(
+      () => readNeuqPlanCompletion(
+        planCompletionHtml.replaceFirst(planFixtureStudent, '00005678'),
+        subject,
+      ),
+      throwsA(SchoolRequestFailure.differentAccount),
+    );
   });
 }

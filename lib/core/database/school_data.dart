@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../features/grades/domain/grades.dart';
+import '../../features/grades/domain/plan_completion.dart';
 import '../../features/timetable/domain/timetable.dart';
 import '../auth/neuq_login_protocol.dart';
 import '../auth/school_auth.dart';
@@ -16,7 +17,7 @@ import 'school_data_source.dart';
 
 export 'school_data_source.dart';
 
-enum SchoolDataSet { timetable, grades }
+enum SchoolDataSet { timetable, grades, planCompletion }
 
 final schoolDataSourceProvider = Provider<SchoolDataSource?>((ref) {
   final supported = ref.watch(schoolAuthRepositoryProvider).available;
@@ -51,6 +52,14 @@ final schoolGradesCacheProvider =
         return Stream.value(null);
       }
       return SchoolDataRepository(ref.watch(databaseProvider)).watchGrades();
+    });
+
+final schoolPlanCompletionCacheProvider =
+    StreamProvider.autoDispose<SchoolCache<PlanCompletion>?>((ref) {
+      if (ref.watch(schoolDataSourceProvider) == null) {
+        return Stream.value(null);
+      }
+      return ref.watch(schoolDataRepositoryProvider).watchPlanCompletion();
     });
 
 final schoolRefreshProvider = FutureProvider.autoDispose
@@ -157,6 +166,8 @@ class SchoolDataRepository {
           'semesterGpa': result.semesterGpa,
           'cumulativeGpa': result.cumulativeGpa,
         };
+      case SchoolDataSet.planCompletion:
+        data = (await source.fetchPlanCompletion()).toJson();
     }
     await _db
         .into(_db.schoolCacheRows)
@@ -195,6 +206,17 @@ class SchoolDataRepository {
                 ) ??
                 const {},
             cumulativeGpa: (data['cumulativeGpa'] as num?)?.toDouble(),
+          ),
+          row.syncedAt.toUtc(),
+        );
+      });
+
+  Stream<SchoolCache<PlanCompletion>?> watchPlanCompletion() =>
+      _row(SchoolDataSet.planCompletion).map((row) {
+        if (row == null) return null;
+        return SchoolCache(
+          PlanCompletion.fromJson(
+            jsonDecode(row.payload) as Map<String, dynamic>,
           ),
           row.syncedAt.toUtc(),
         );

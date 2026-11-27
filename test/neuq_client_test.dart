@@ -12,9 +12,12 @@ import 'package:material_ui/material_ui.dart'
 import 'package:neuq_one/app/school_reconnect_button.dart';
 import 'package:neuq_one/core/auth/neuq_login_protocol.dart';
 import 'package:neuq_one/core/auth/school_auth.dart';
+import 'package:neuq_one/core/database/neuq_school_data_source.dart';
 import 'package:neuq_one/core/network/neuq_client.dart'
     show NeuqClient, NeuqPage, SchoolSessionHealth, SchoolSessionStatus;
 import 'package:pointycastle/export.dart';
+
+import 'fixtures/plan_completion.dart';
 
 const _account = NeuqCredentials('00001234', 'synthetic-password');
 final _subject = schoolSubjectForStudentCode(_account.username)!;
@@ -56,6 +59,37 @@ void main() {
   });
 
   tearDown(() => client.dispose());
+
+  test(
+    'plan completion uses the signed-in academic session and AJAX GET',
+    () async {
+      await client.signIn(_account, onVerified: (_) async {});
+      var planRequests = 0;
+      school.intercept = (request) async {
+        if (request.url.path != NeuqPage.planCompletion.path) return null;
+        planRequests++;
+        expect(request.method, 'GET');
+        expect(
+          request.url.toString(),
+          'https://jwxt.neuq.edu.cn/eams/myPlanCompl.action',
+        );
+        expect(request.headers['x-requested-with'], 'XMLHttpRequest');
+        expect(request.headers['cookie'], 'ACADEMIC=session-1');
+        return http.Response(
+          planCompletionHtml,
+          200,
+          headers: {'content-type': 'text/html; charset=UTF-8'},
+        );
+      };
+      final report = await NeuqSchoolDataSource(
+        client,
+        _subject,
+      ).fetchPlanCompletion();
+      expect(report.credits.required, 12.5);
+      expect(planRequests, 1);
+      expect(school.loginAttempts, 1);
+    },
+  );
 
   test(
     'verified login shares only academic cookies with grade requests',

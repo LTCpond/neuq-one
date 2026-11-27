@@ -6,6 +6,7 @@ import '../core/auth/school_auth.dart';
 import '../core/database/school_data.dart';
 import '../core/theme/app_theme.dart';
 import '../features/grades/presentation/grades_page.dart';
+import '../features/grades/presentation/plan_completion_page.dart';
 import '../features/mail/presentation/campus_mail_page.dart';
 import '../features/profile/presentation/profile_page.dart';
 import '../features/profile/presentation/update_prompt.dart';
@@ -20,11 +21,12 @@ import '../features/timetable/presentation/timetable_page.dart';
 import 'login_page.dart';
 
 const _timetablePath = '/timetable';
+const _gradesPath = '/grades';
 const _servicesPath = '/services';
 
 const _tabs = [
   (path: _timetablePath, label: '课表', icon: 'timetable', page: TimetablePage()),
-  (path: '/grades', label: '成绩', icon: 'grades', page: GradesPage()),
+  (path: _gradesPath, label: '成绩', icon: 'grades', page: GradesPage()),
   (path: _servicesPath, label: '服务', icon: 'services', page: ServicesPage()),
   (path: '/profile', label: '我的', icon: 'profile', page: ProfilePage()),
 ];
@@ -66,6 +68,12 @@ final routerProvider = Provider<GoRouter>((ref) {
                   path: tab.path,
                   builder: (context, state) => tab.page,
                   routes: [
+                    if (tab.path == _gradesPath)
+                      GoRoute(
+                        path: 'plan-completion',
+                        parentNavigatorKey: rootNavigator,
+                        builder: (context, state) => const PlanCompletionPage(),
+                      ),
                     if (tab.path == _servicesPath) ...[
                       GoRoute(
                         path: 'classrooms',
@@ -161,7 +169,7 @@ class _NavigationState extends ConsumerState<_Navigation> {
           selectedIndex: shell.currentIndex,
           onDestinationSelected: (index) {
             final section = switch (_tabs[index].path) {
-              '/grades' => SchoolDataSet.grades,
+              _gradesPath => SchoolDataSet.grades,
               _timetablePath => SchoolDataSet.timetable,
               _ => null,
             };

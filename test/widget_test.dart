@@ -15,13 +15,17 @@ import 'package:neuq_one/app/app.dart';
 import 'package:neuq_one/app/login_page.dart';
 import 'package:neuq_one/app/router.dart';
 import 'package:neuq_one/core/auth/school_auth.dart';
+import 'package:neuq_one/core/auth/neuq_login_protocol.dart';
 import 'package:neuq_one/core/database/school_data.dart';
 import 'package:neuq_one/core/storage/settings.dart';
 import 'package:neuq_one/core/network/public_data_client.dart';
 import 'package:neuq_one/core/time/campus_clock.dart';
 import 'package:neuq_one/core/time/neuq_periods.dart';
 import 'package:neuq_one/features/grades/data/local_grades.dart';
+import 'package:neuq_one/features/grades/data/neuq_plan_completion.dart';
 import 'package:neuq_one/features/grades/domain/grades.dart';
+import 'package:neuq_one/features/grades/domain/plan_completion.dart';
+import 'package:neuq_one/features/grades/presentation/plan_completion_page.dart';
 import 'package:neuq_one/features/mail/data/campus_mail.dart';
 import 'package:neuq_one/features/mail/presentation/campus_mail_page.dart';
 import 'package:neuq_one/features/profile/data/course_reminders.dart';
@@ -42,6 +46,7 @@ import 'package:neuq_one/features/timetable/presentation/timetable_page.dart';
 import 'package:neuq_one/features/timetable/presentation/week_timetable.dart';
 
 import 'fixtures/classroom_week.dart';
+import 'fixtures/plan_completion.dart';
 
 void main() {
   final sampleTerm = Semester(
@@ -313,6 +318,55 @@ void main() {
         ),
       ],
     ),
+  );
+
+  final planRefreshes = <SchoolDataSet>[];
+  _appTest(
+    'grades open the plan audit and expand courses from the last snapshot',
+    (tester) async {
+      await _tab(tester, '成绩');
+      expect(planRefreshes, isNot(contains(SchoolDataSet.planCompletion)));
+      await tester.tap(find.text('培养方案完成情况'));
+      await tester.pumpAndSettle();
+      expect(find.byType(PlanCompletionPage), findsOneWidget);
+      expect(find.text('培养方案'), findsOneWidget);
+      expect(
+        planRefreshes.where(
+          (section) => section == SchoolDataSet.planCompletion,
+        ),
+        hasLength(1),
+      );
+      expect(find.text('距离计划要求还差 4 学分'), findsOneWidget);
+      expect(find.text('2/3'), findsOneWidget);
+      expect(find.text('示例数学'), findsNothing);
+      await tester.tap(find.text('通识类课程'));
+      await tester.pumpAndSettle();
+      expect(find.text('科学基础'), findsOneWidget);
+      await tester.tap(find.text('科学基础'));
+      await tester.pumpAndSettle();
+      expect(find.text('示例数学'), findsOneWidget);
+      expect(find.text('大一上 · 必修 · 4 学分'), findsOneWidget);
+      // The only '已通过' text left is the filter chip; course status is
+      // conveyed by the semantic status icon.
+      expect(find.text('已通过'), findsOneWidget);
+      final planList = find.descendant(
+        of: find.byType(PlanCompletionPage),
+        matching: find.byType(Scrollable),
+      );
+      final pending = find.byIcon(Icons.schedule_rounded);
+      await tester.scrollUntilVisible(pending, 100, scrollable: planList);
+      expect(pending, findsOneWidget);
+    },
+    planCompletion: readNeuqPlanCompletion(
+      planCompletionHtml,
+      schoolSubjectForStudentCode(planFixtureStudent)!,
+    ),
+    onRefresh: (section) {
+      planRefreshes.add(section);
+      if (section == SchoolDataSet.planCompletion) {
+        throw SchoolRequestFailure.unavailable;
+      }
+    },
   );
 
   final refreshed = <SchoolDataSet>[];
@@ -1148,6 +1202,7 @@ void _appTest(
   _TestAuth auth = const _TestAuth(),
   Future<void> Function(WidgetTester)? beforeSettle,
   SchoolGradeBook? schoolGrades,
+  PlanCompletion? planCompletion,
   Timetable? initialTimetable,
   CampusCardBalance? campusCardBalance,
   CampusCardRepository? campusCardRepository,
@@ -1189,10 +1244,18 @@ void _appTest(
               schoolRefreshProvider.overrideWith(
                 (ref, section) async => onRefresh(section),
               ),
-            if (schoolGrades != null)
-              schoolGradesCacheProvider.overrideWith(
-                (ref) =>
-                    Stream.value(SchoolCache(schoolGrades, DateTime.utc(2026))),
+            schoolGradesCacheProvider.overrideWith(
+              (ref) => Stream<SchoolCache<SchoolGradeBook>?>.value(
+                schoolGrades == null
+                    ? null
+                    : SchoolCache(schoolGrades, DateTime.utc(2026)),
+              ),
+            ),
+            if (planCompletion != null)
+              schoolPlanCompletionCacheProvider.overrideWith(
+                (ref) => Stream.value(
+                  SchoolCache(planCompletion, DateTime.utc(2026)),
+                ),
               ),
             if (campusCardBalance != null)
               campusCardBalanceProvider.overrideWith(

@@ -1,5 +1,7 @@
 import '../../features/grades/data/neuq_grades.dart';
+import '../../features/grades/data/neuq_plan_completion.dart';
 import '../../features/grades/domain/grades.dart';
+import '../../features/grades/domain/plan_completion.dart';
 import '../../features/timetable/data/neuq_timetable.dart';
 import '../../features/timetable/domain/timetable.dart';
 import '../network/neuq_client.dart';
@@ -90,4 +92,11 @@ class NeuqSchoolDataSource implements SchoolDataSource {
     }
     return readNeuqGrades(response, catalog);
   });
+
+  @override
+  Future<PlanCompletion> fetchPlanCompletion() =>
+      _client.read(_subject, (session) async {
+        final response = await session.request(NeuqPage.planCompletion);
+        return readNeuqPlanCompletion(response, _subject);
+      });
 }

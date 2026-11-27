@@ -72,14 +72,19 @@ enum NeuqPage {
   timetable('/eams/courseTableForStd.action', ajax: true),
   calendar('/eams/dataQuery.action', ajax: true),
   schedule('/eams/courseTableForStd!courseTable.action', ajax: true),
-  grades('/eams/teach/grade/course/person!historyCourseGrade.action');
+  grades('/eams/teach/grade/course/person!historyCourseGrade.action'),
+  planCompletion('/eams/myPlanCompl.action', ajax: true, ajaxQuery: false);
 
-  const NeuqPage(this.path, {this.ajax = false});
+  const NeuqPage(this.path, {this.ajax = false, this.ajaxQuery = true});
   final String path;
   final bool ajax;
+  final bool ajaxQuery;
 
   Uri requestUri([Map<String, String> query = const {}]) {
-    final parameters = {if (ajax) 'sf_request_type': 'ajax', ...query};
+    final parameters = {
+      if (ajax && ajaxQuery) 'sf_request_type': 'ajax',
+      ...query,
+    };
     return Uri.https(
       schoolAcademicHost,
       path,
