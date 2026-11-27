@@ -4,7 +4,7 @@
 
 面向东北大学秦皇岛分校学生的非官方轻量校园工具，使用 Flutter 构建，源码采用 [MIT 许可证](LICENSE)。
 
-[下载 Android v0.1.0 公测版](https://github.com/LTCpond/neuq-one/releases/tag/v0.1.0)。常见 Android 手机请选择 `arm64-v8a` APK。
+[下载 Android v0.1.1 公测版](https://github.com/LTCpond/neuq-one/releases/tag/v0.1.1)。常见 Android 手机请选择 `arm64-v8a` APK。
 
 ## 功能
 
