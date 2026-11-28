@@ -19,6 +19,7 @@ jobs:
       contents: read
     outputs:
       channel: ${{ steps.release-config.outputs.channel }}
+      apk-artifact: ${{ steps.release-config.outputs.apk-artifact }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -38,6 +39,7 @@ jobs:
             beta|stable) echo "channel=$channel" >> "$GITHUB_OUTPUT" ;;
             *) echo '发布渠道必须为 beta 或 stable。'; exit 1 ;;
           esac
+          echo "apk-artifact=release-apks-$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
       - uses: ./.github/actions/verify-android
         id: verify-android
       - name: Build and verify signed APKs by ABI
@@ -112,7 +114,7 @@ jobs:
           done
       - uses: actions/upload-artifact@v6
         with:
-          name: release-apks
+          name: ${{ steps.release-config.outputs.apk-artifact }}
           path: release-apks/*.apk
           if-no-files-found: error
           retention-days: 7
@@ -120,7 +122,7 @@ jobs:
   publish:
     needs: build
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 25
     permissions:
       contents: write
     steps:
@@ -129,24 +131,31 @@ jobs:
           persist-credentials: false
       - uses: actions/download-artifact@v7
         with:
-          name: release-apks
+          name: ${{ needs.build.outputs.apk-artifact }}
           path: release-apks
-      - name: Publish APKs and generated release notes
-        shell: bash
+      - name: Check existing GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
           UPDATE_CHANNEL: ${{ needs.build.outputs.channel }}
-        run: |
-          release_flags=(--latest)
-          if [[ "$UPDATE_CHANNEL" == 'beta' ]]; then
-            release_flags=(--prerelease --latest=false --title "$GITHUB_REF_NAME 公测版")
-          fi
-          notes=".github/release-notes/$GITHUB_REF_NAME.md"
-          if [[ -f "$notes" ]]; then
-            release_flags+=(--notes-file "$notes")
-          fi
-          gh release create "$GITHUB_REF_NAME" release-apks/*.apk \
-            --repo "$GITHUB_REPOSITORY" --verify-tag --generate-notes "${release_flags[@]}"
+        run: python3 .github/scripts/release-apks.py check-github
+      - name: Upload and verify APKs on R2
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_ENDPOINT_URL_S3: ${{ secrets.R2_ENDPOINT }}
+          AWS_DEFAULT_REGION: auto
+          AWS_REQUEST_CHECKSUM_CALCULATION: when_required
+          AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
+          AWS_RETRY_MODE: standard
+          AWS_MAX_ATTEMPTS: '4'
+          R2_BUCKET: ${{ vars.R2_BUCKET }}
+          R2_PUBLIC_URL: ${{ vars.R2_PUBLIC_URL }}
+        run: python3 .github/scripts/release-apks.py upload-r2
+      - name: Publish verified APKs, download metadata and release notes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          UPDATE_CHANNEL: ${{ needs.build.outputs.channel }}
+        run: python3 .github/scripts/release-apks.py publish-github
 
   update-version-manifest:
     needs: publish

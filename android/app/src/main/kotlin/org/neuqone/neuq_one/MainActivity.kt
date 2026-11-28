@@ -71,12 +71,14 @@ class MainActivity : FlutterActivity() {
             flutterEngine.dartExecutor.binaryMessenger,
             "org.neuqone.neuq_one/app_version"
         ).setMethodCallHandler { call, result ->
-            if (call.method == "getVersion") {
-                @Suppress("DEPRECATION")
-                val version = packageManager.getPackageInfo(packageName, 0).versionName
-                result.success(version)
-            } else {
-                result.notImplemented()
+            when (call.method) {
+                "getVersion" -> {
+                    @Suppress("DEPRECATION")
+                    val version = packageManager.getPackageInfo(packageName, 0).versionName
+                    result.success(version)
+                }
+                "getSupportedAbis" -> result.success(Build.SUPPORTED_ABIS.toList())
+                else -> result.notImplemented()
             }
         }
         MethodChannel(

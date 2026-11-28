@@ -72,6 +72,187 @@ void main() {
     }
   });
 
+  const abis = ['arm64-v8a', 'armeabi-v7a', 'x86_64'];
+
+  void emulateAndroid(Object? supportedAbis) {
+    debugDefaultTargetPlatformOverride = TargetPlatform.android;
+    addTearDown(() => debugDefaultTargetPlatformOverride = null);
+    messenger.setMockMethodCallHandler(channel, (call) async {
+      if (call.method == 'getSupportedAbis') return supportedAbis;
+      expect(call.method, 'getVersion');
+      return installed;
+    });
+  }
+
+  for (final abi in abis) {
+    test('selects $abi according to Android ABI order', () async {
+      emulateAndroid([
+        'unknown-abi',
+        abi,
+        ...abis.where((other) => other != abi),
+      ]);
+      final metadata = abis.map((entry) => _download(latest, entry)).toList();
+      final offer =
+          await repository({..._release(latest), 'downloads': metadata})
+                  .checkForUpdate()
+              as AppUpdateAvailable;
+      final expected = _download(latest, abi);
+      expect(offer.url, _releaseUrl(latest));
+      expect(offer.download?.abi, abi);
+      expect(offer.download?.filename, expected['filename']);
+      expect(offer.download?.url, expected['url']);
+      expect(offer.download?.fallbackUrl, expected['fallbackUrl']);
+      expect(offer.download?.size, expected['size']);
+      expect(offer.download?.sha256, expected['sha256']);
+    });
+  }
+
+  test('keeps the GitHub release link for old, unmatched or invalid downloads', () async {
+    emulateAndroid(['arm64-v8a', 'armeabi-v7a']);
+    final valid = _download(latest, 'arm64-v8a');
+    final noUrl = {...valid}..remove('url');
+    for (final invalid in [
+      null,
+      [_download(latest, 'x86_64')],
+      [noUrl],
+      [valid, valid],
+      [
+        {...valid, 'url': '${valid['url']}?download=true'},
+      ],
+      [
+        {...valid, 'url': '${valid['url']}'.replaceFirst('https:', 'http:')},
+      ],
+      [
+        {
+          ...valid,
+          'url': '${valid['url']}'.replaceFirst(
+            'download.neuq.one',
+            'download.neuq.one.test',
+          ),
+        },
+      ],
+      [
+        {
+          ...valid,
+          'url': '${valid['url']}'.replaceFirst('/v$latest/', '/v1.2.3/'),
+        },
+      ],
+      [
+        {
+          ...valid,
+          'fallbackUrl':
+              'https://github.com/other/project/releases/download/v$latest/app.apk',
+        },
+      ],
+      [
+        {...valid, 'size': 0},
+      ],
+      [
+        {...valid, 'size': 2147483648},
+      ],
+      [
+        {...valid, 'sha256': '${valid['sha256']}\n'},
+      ],
+    ]) {
+      final offer =
+          await repository({..._release(latest), 'downloads': ?invalid})
+                  .checkForUpdate()
+              as AppUpdateAvailable;
+      expect(offer.download, isNull);
+      expect(offer.url, _releaseUrl(latest));
+    }
+  });
+
+  test('uses the release page when the ABI method is unavailable', () async {
+    emulateAndroid(null);
+    messenger.setMockMethodCallHandler(channel, (call) async {
+      if (call.method == 'getSupportedAbis') throw MissingPluginException();
+      return installed;
+    });
+    final offer =
+        await repository({
+              ..._release(latest),
+              'downloads': [_download(latest, 'arm64-v8a')],
+            }).checkForUpdate()
+            as AppUpdateAvailable;
+    expect(offer.download, isNull);
+    expect(offer.url, _releaseUrl(latest));
+  });
+
+  test(
+    'restores validated downloads and selects against the current ABI order',
+    () async {
+      emulateAndroid(['x86_64']);
+      final prefs = _UpdatePreferences();
+      final downloads = abis.map((abi) => _download(latest, abi)).toList();
+      final repo = repository({..._release(latest), 'downloads': downloads});
+      final initial = AppUpdateCoordinator(repo, prefs);
+      addTearDown(initial.dispose);
+      await initial.check(automatic: false);
+      expect(initial.available?.download?.abi, 'x86_64');
+      final saved =
+          jsonDecode(prefs.values['appUpdates.state.v1'] as String) as Map;
+      expect(saved['available']['downloads'], downloads);
+      messenger.setMockMethodCallHandler(channel, (call) async {
+        return call.method == 'getSupportedAbis' ? ['arm64-v8a'] : installed;
+      });
+      final restored = AppUpdateCoordinator(repo, prefs);
+      addTearDown(restored.dispose);
+      await restored.restore();
+      expect(restored.available?.download?.abi, 'arm64-v8a');
+      expect(
+        restored.available?.download?.fallbackUrl,
+        downloads.first['fallbackUrl'],
+      );
+    },
+  );
+
+  for (final (label, target) in [
+    ('立即更新', 'url'),
+    ('GitHub 备用下载', 'fallbackUrl'),
+  ]) {
+    testWidgets('the update dialog opens $label in the browser', (
+      tester,
+    ) async {
+      emulateAndroid(['arm64-v8a']);
+      const browser = MethodChannel('plugins.flutter.io/url_launcher');
+      final calls = <MethodCall>[];
+      messenger.setMockMethodCallHandler(browser, (call) async {
+        calls.add(call);
+        return true;
+      });
+      addTearDown(() => messenger.setMockMethodCallHandler(browser, null));
+      final download = _download(latest, 'arm64-v8a');
+      final scope = await _mountApp(
+        tester,
+        MockClient(
+          (_) async => _manifest({
+            ..._release(latest, changelog: ['修复测试功能']),
+            'downloads': [download],
+          }),
+        ),
+        _UpdatePreferences(),
+      );
+      if (target == 'fallbackUrl') {
+        await tester.tap(find.text('稍后更新'));
+        await tester.pumpAndSettle();
+        scope.read(routerProvider).go('/profile');
+        await tester.pumpAndSettle();
+        final checkUpdate = find.text('检查更新');
+        await tester.ensureVisible(checkUpdate);
+        await tester.pumpAndSettle();
+        await tester.tap(checkUpdate);
+        await tester.pumpAndSettle();
+      }
+      expect(find.text('修复测试功能'), findsOneWidget);
+      expect(find.text('立即更新'), findsOneWidget);
+      expect(find.text('GitHub 备用下载'), findsOneWidget);
+      await tester.tap(find.text(label));
+      await tester.pumpAndSettle();
+      expect(calls.single.arguments, containsPair('url', download[target]));
+    });
+  }
+
   testWidgets(
     'Android Debug shows DEV and checks published versions only on demand',
     (tester) async {
@@ -813,6 +994,19 @@ void main() {
 
 String _releaseUrl(String version) =>
     'https://github.com/LTCpond/neuq-one/releases/tag/v$version';
+
+Map<String, Object> _download(String version, String abi) {
+  final filename = 'neuq-one-v$version-$abi.apk';
+  return {
+    'abi': abi,
+    'filename': filename,
+    'url': 'https://download.neuq.one/releases/v$version/$filename',
+    'fallbackUrl':
+        'https://github.com/LTCpond/neuq-one/releases/download/v$version/$filename',
+    'size': 524288,
+    'sha256': 'a' * 64,
+  };
+}
 
 Matcher _manifestFailure(DiagnosticCode code) => throwsA(
   isA<PublicDataException>().having((error) => error.code, 'code', code),

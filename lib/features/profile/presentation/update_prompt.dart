@@ -244,13 +244,14 @@ Future<void> _showUpdate(
   AppUpdateAvailable offer,
   VoidCallback onShown,
 ) async {
-  final dialog = showDialog<bool>(
+  final dialog = showDialog<String>(
     context: context,
     builder: (context) => _AppUpdateDialog(offer),
   );
   onShown();
-  if (await dialog == true && context.mounted) {
-    await openOfficialPage(context, offer.url);
+  final url = await dialog;
+  if (url != null && context.mounted) {
+    await openOfficialPage(context, url);
   }
 }
 
@@ -262,6 +263,7 @@ class _AppUpdateDialog extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final download = offer.download;
     final title =
         'NEUQ One v${offer.latestVersion}${offer.prerelease ? ' 公测版' : ''}';
     return AlertDialog(
@@ -295,12 +297,17 @@ class _AppUpdateDialog extends StatelessWidget {
       ),
       actions: [
         TextButton(
-          onPressed: () => Navigator.pop(context, false),
+          onPressed: () => Navigator.pop(context),
           child: const Text('稍后更新'),
         ),
+        if (download != null)
+          TextButton(
+            onPressed: () => Navigator.pop(context, download.fallbackUrl),
+            child: const Text('GitHub 备用下载'),
+          ),
         TextButton(
-          onPressed: () => Navigator.pop(context, true),
-          child: const Text('前往下载'),
+          onPressed: () => Navigator.pop(context, download?.url ?? offer.url),
+          child: Text(download == null ? '前往下载' : '立即更新'),
         ),
       ],
     );

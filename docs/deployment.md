@@ -8,10 +8,10 @@
 
 ## 标签自动发布
 
-1. 更新 `pubspec.yaml` 的版本和 Android 构建号，构建号必须大于已使用的构建号。提交并合并变更后，使用版本中 `+` 之前的部分作为标签。例如 `0.1.0+17` 对应标签 `v0.1.0`。
-2. 确认仓库已配置正式签名 Secrets。准备发布时，在目标提交上创建标签并推送到 `origin`。[Android 签名配置](android-signing.md)
+1. 先合并 Data 仓库的清单生成变更，确认 Azure 和 Cloudflare Pages 的静态资源部署成功。更新 App 仓库的 `pubspec.yaml`，使用未发布过的版本号和更高的 Android 构建号。标签使用 `+` 之前的版本号，例如 `0.2.0+21` 对应 `v0.2.0`。
+2. 确认 App 仓库已有正式签名 Secrets、`R2_ACCESS_KEY_ID`、`R2_SECRET_ACCESS_KEY`、`R2_ENDPOINT`、`R2_BUCKET` 和 `R2_PUBLIC_URL`。后者为 `https://download.neuq.one`。准备发布时，手动在目标提交上创建标签并推送到 `origin`。[Android 签名配置](android-signing.md)
 3. 标签指向的提交使用 `.github/release-channel` 设置 `beta` 或 `stable`。公测阶段提交 `beta`，工作流会发布为预发行版。只有明确准备正式发布时才在目标提交改为 `stable`，发布为 Latest。相同的渠道配置写入 APK 的 `NEUQ_ONE_UPDATE_CHANNEL`，随安装包保留。手工构建正式包时也要传入 `--dart-define=NEUQ_ONE_UPDATE_CHANNEL=stable`。
-4. **Android Release** 复用常规 CI 的工具链和检查，构建 `armeabi-v7a`、`arm64-v8a`、`x86_64` 三个 APK。验签通过后，GitHub CLI 上传 APK，并将维护者摘要放在自动生成的 Release Notes 前面。[发布工作流](../.github/workflows/release.yml) · [GitHub Releases](https://github.com/LTCpond/neuq-one/releases)
+4. **Android Release** 复用常规 CI 的工具链和检查，构建 `armeabi-v7a`、`arm64-v8a`、`x86_64` 三个 APK。验签后使用 R2 条件写入上传至 `releases/v<版本>/`，核对 S3 对象和公开下载响应的大小及 SHA-256。全部通过后，将三个 APK 和 `apk-downloads.json` 上传到 GitHub Release 草稿，核验附件后发布。维护者摘要放在自动生成的 Release Notes 前面。[发布工作流](../.github/workflows/release.yml) · [GitHub Releases](https://github.com/LTCpond/neuq-one/releases)
 5. 任一渠道发布成功后，工作流使用 `NEUQ_ASSETS_DISPATCH_TOKEN` 触发 Data 仓库 `main` 上的 `assets.yml`。由内置 `GITHUB_TOKEN` 创建的 Release 需要此显式触发。[GitHub 工作流触发规则](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/trigger-a-workflow#triggering-a-workflow-from-a-workflow)
 
 ## 填写更新摘要
@@ -28,8 +28,8 @@
 
 ## 手动发布和验证
 
-`v0.1.0+18` 延用 `v0.1.0` 公测版本号，只递增构建号。重发前核对旧远端标签已撤回，再按公测渠道流程发布。同版本号的旧公测包可从 Release 页面手动下载较高构建号并覆盖安装，签名与包名须一致。
+R2 上传或 GitHub 发布失败时，在原 **Android Release** 运行中选择 **Re-run failed jobs**，复用保留七天的已验签 APK 构建产物。相同内容会通过校验并跳过重复写入。若同版本内容冲突，保留现有文件，为新 APK 使用新版本号。若只有清单触发失败，可重跑该失败任务或手动运行 **Update app version manifest**。
 
 手动发布时，使用与版本匹配的标签创建 Release 草稿，上传已验签的 APK，并确认 GitHub 的发布类型与 APK 的构建渠道一致。**Update app version manifest** 监听发布、编辑、撤回和删除事件。若事件由内置令牌操作产生或触发失败，可在 App 仓库的 Actions 手动运行此工作流，也可重跑 Data 的 **Deploy static assets**。[版本清单工作流](../.github/workflows/app-version.yml)
 
-先部署 Data 端的双渠道清单，再使用更新后的 App 发布流程。发布后在 Data 仓库确认 **Deploy static assets** 成功，核对 `release` 与 `prerelease` 的版本、下载地址及摘要，再从较旧客户端的「我的」手动检查。正式客户端只读取正式版，公测客户端比较两个渠道并选版本最高的一项，同版本时优先正式版。[线上版本清单](https://neuq-one-assets.pages.dev/assets/app/latest.json)
+发布后在 Data 仓库确认 **Deploy static assets** 的 Azure 和 Cloudflare Pages 任务成功。核对两站清单的渠道、三种 APK 的 `downloads`、GitHub Release 页面地址及摘要。分别从较旧客户端和支持 R2 的客户端进入「我的」手动检查，验证 Release 页面、匹配 ABI 的 R2 下载及 GitHub 备用下载。正式客户端只读取正式版，公测客户端比较两个渠道并选版本最高的一项，同版本时优先正式版。[线上版本清单](https://neuq-one-assets.pages.dev/assets/app/latest.json)

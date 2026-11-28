@@ -166,7 +166,8 @@ class AppUpdateCoordinator {
         await _saveState();
         return;
       }
-      if (!_disposed) _available.value = offer.forInstalled(installed);
+      final available = await _repository._offer(offer, installed);
+      if (!_disposed) _available.value = available;
     } catch (error) {
       _updateLog(DiagnosticStage.read, error: error);
     }
@@ -409,23 +410,99 @@ class PublishedAppVersion extends AppUpdateResult {
 }
 
 class AppUpdateAvailable extends AppUpdateResult {
-  const AppUpdateAvailable._(this.currentVersion, this._release);
+  const AppUpdateAvailable._(this.currentVersion, this._release, this.download);
 
   final String currentVersion;
   final _AppRelease _release;
+  final AppUpdateDownload? download;
   String get latestVersion => _release.version;
   String get url => _release.url;
   bool get prerelease => _release.prerelease;
   List<String> get changelog => _release.changelog;
 }
 
+class AppUpdateDownload {
+  const AppUpdateDownload._(
+    this.abi,
+    this.filename,
+    this.url,
+    this.fallbackUrl,
+    this.size,
+    this.sha256,
+  );
+
+  static const _abis = {'arm64-v8a', 'armeabi-v7a', 'x86_64'};
+  static const _maxApkBytes = 2 * 1024 * 1024 * 1024 - 1;
+  static final _sha256Pattern = RegExp(r'^[a-f0-9]{64}$');
+
+  final String abi;
+  final String filename;
+  final String url;
+  final String fallbackUrl;
+  final int size;
+  final String sha256;
+
+  static Map<String, AppUpdateDownload> _read(Object? value, String version) {
+    if (value is! List || value.length > _abis.length) return const {};
+    final downloads = <String, AppUpdateDownload>{};
+    for (final entry in value) {
+      if (entry
+          case {
+            'abi': final String abi,
+            'filename': final String filename,
+            'url': final String url,
+            'fallbackUrl': final String fallbackUrl,
+            'size': final int size,
+            'sha256': final String sha256,
+          }
+          when _abis.contains(abi) &&
+              !downloads.containsKey(abi) &&
+              filename == 'neuq-one-v$version-$abi.apk' &&
+              url == 'https://download.neuq.one/releases/v$version/$filename' &&
+              fallbackUrl ==
+                  'https://github.com/LTCpond/neuq-one/releases/download/v$version/$filename' &&
+              size > 0 &&
+              size <= _maxApkBytes &&
+              _sha256Pattern.stringMatch(sha256) == sha256) {
+        downloads[abi] = AppUpdateDownload._(
+          abi,
+          filename,
+          url,
+          fallbackUrl,
+          size,
+          sha256,
+        );
+      } else {
+        return const {};
+      }
+    }
+    return downloads;
+  }
+
+  Map<String, Object> _toJson() => {
+    'abi': abi,
+    'filename': filename,
+    'url': url,
+    'fallbackUrl': fallbackUrl,
+    'size': size,
+    'sha256': sha256,
+  };
+}
+
 class _AppRelease {
-  const _AppRelease(this.version, this.url, this.prerelease, this.changelog);
+  const _AppRelease(
+    this.version,
+    this.url,
+    this.prerelease,
+    this.changelog,
+    this.downloads,
+  );
 
   final String version;
   final String url;
   final bool prerelease;
   final List<String> changelog;
+  final Map<String, AppUpdateDownload> downloads;
 
   factory _AppRelease.read(Object? value, {bool? expectedPrerelease}) {
     if (value case {'version': final String version, 'url': final String url}
@@ -452,6 +529,7 @@ class _AppRelease {
                       .take(5)
                 : const <String>[],
           ),
+          AppUpdateDownload._read(object['downloads'], version),
         );
       }
     }
@@ -471,10 +549,11 @@ class _AppRelease {
     'url': url,
     'prerelease': prerelease,
     'changelog': changelog,
+    if (downloads.isNotEmpty)
+      'downloads': downloads.values
+          .map((download) => download._toJson())
+          .toList(),
   };
-
-  AppUpdateAvailable forInstalled(String installed) =>
-      AppUpdateAvailable._(installed, this);
 }
 
 final _versionPattern = RegExp(
@@ -563,7 +642,34 @@ class AppUpdatesRepository {
       code: newer ? DiagnosticCode.updateAvailable : DiagnosticCode.upToDate,
       level: DiagnosticSeverity.info,
     );
-    return newer ? latest.forInstalled(installed) : const AppUpToDate();
+    if (!newer) return const AppUpToDate();
+    return _offer(latest, installed);
+  }
+
+  Future<AppUpdateAvailable> _offer(
+    _AppRelease release,
+    String installed,
+  ) async {
+    if (release.downloads.isNotEmpty &&
+        !kIsWeb &&
+        defaultTargetPlatform == TargetPlatform.android) {
+      try {
+        final abis = await _channel.invokeMethod<Object?>('getSupportedAbis');
+        if (abis is List) {
+          for (final abi in abis) {
+            final download = release.downloads[abi];
+            if (download != null) {
+              return AppUpdateAvailable._(installed, release, download);
+            }
+          }
+        }
+      } on PlatformException {
+        // The release page can still be opened when ABI detection fails.
+      } on MissingPluginException {
+        // The platform channel may be unavailable on older native builds.
+      }
+    }
+    return AppUpdateAvailable._(installed, release, null);
   }
 
   _AppRelease? _readManifest(String body) {
