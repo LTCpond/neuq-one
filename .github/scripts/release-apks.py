@@ -9,7 +9,7 @@ import sys
 from tempfile import TemporaryDirectory
 from time import sleep
 from urllib.error import HTTPError, URLError
-from urllib.request import HTTPRedirectHandler, build_opener
+from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 
 REPOSITORY = "LTCpond/neuq-one"
@@ -71,9 +71,12 @@ class RejectRedirect(HTTPRedirectHandler):
 
 def verify_public_download(download, request=build_opener(RejectRedirect()).open):
     filename = download["filename"]
+    public_request = Request(
+        download["url"], headers={"User-Agent": "NEUQ-One-Release/1.0 (+https://neuq.one)"},
+    )
     for attempt in range(4):
         try:
-            with request(download["url"], timeout=45) as response:
+            with request(public_request, timeout=45) as response:
                 if (response.status != 200 or response.headers.get_content_type() != APK_TYPE
                         or response.headers.get_content_disposition() != "attachment"
                         or response.headers.get_filename() != filename

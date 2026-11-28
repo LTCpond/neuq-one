@@ -1,0 +1,67 @@
+name: Recover Android v0.1.3 Release
+
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/recover-v0.1.3.yml']
+
+permissions: {}
+
+concurrency:
+  group: android-release-refs/tags/v0.1.3
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: github.repository == 'LTCpond/neuq-one'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      actions: read
+      contents: write
+    env:
+      UPDATE_CHANNEL: beta
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify release target
+        run: |
+          test "$(git rev-parse 'refs/tags/v0.1.3^{commit}')" = bedd7eafedf9c342bb57f3c15a804a03862d7fea
+          test "$(git show refs/tags/v0.1.3:.github/release-channel)" = "$UPDATE_CHANNEL"
+          git diff --exit-code refs/tags/v0.1.3 HEAD -- .github/release-notes/v0.1.3.md
+      - name: Download previously verified signed APKs
+        uses: actions/download-artifact@v7
+        with:
+          artifact-ids: '15268655742'
+          path: release-apks
+          run-id: 46156896389
+          github-token: ${{ github.token }}
+      - name: Check existing GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: GITHUB_REF_NAME=v0.1.3 python3 .github/scripts/release-apks.py check-github
+      - name: Upload and verify APKs on R2
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_ENDPOINT_URL_S3: ${{ secrets.R2_ENDPOINT }}
+          AWS_DEFAULT_REGION: auto
+          AWS_REQUEST_CHECKSUM_CALCULATION: when_required
+          AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
+          AWS_RETRY_MODE: standard
+          AWS_MAX_ATTEMPTS: '4'
+          R2_BUCKET: ${{ vars.R2_BUCKET }}
+          R2_PUBLIC_URL: ${{ vars.R2_PUBLIC_URL }}
+        run: GITHUB_REF_NAME=v0.1.3 python3 .github/scripts/release-apks.py upload-r2
+      - name: Publish verified APKs, download metadata and release notes
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: GITHUB_REF_NAME=v0.1.3 python3 .github/scripts/release-apks.py publish-github
+
+  update-version-manifest:
+    needs: publish
+    uses: ./.github/workflows/app-version.yml
+    secrets:
+      NEUQ_ASSETS_DISPATCH_TOKEN: ${{ secrets.NEUQ_ASSETS_DISPATCH_TOKEN }}

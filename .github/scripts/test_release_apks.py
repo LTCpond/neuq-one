@@ -53,8 +53,9 @@ class R2:
         return result(args)
 
     def verify(self, download):
-        def request(url, *, timeout):
-            key = url.removeprefix("https://download.neuq.one/")
+        def open_request(request, *, timeout):
+            assert request.get_header("User-agent") == "NEUQ-One-Release/1.0 (+https://neuq.one)"
+            key = request.full_url.removeprefix("https://download.neuq.one/")
             body, mime, disposition = self.objects[key]
             response = BytesIO(body)
             response.status = 200
@@ -64,7 +65,7 @@ class R2:
             response.headers["Content-Length"] = str(len(body))
             return response
 
-        release_apks.verify_public_download(download, request)
+        release_apks.verify_public_download(download, open_request)
         self.verifications.append(download["filename"])
 
 
