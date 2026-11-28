@@ -73,6 +73,7 @@ class GitHub:
     def __init__(self, tag):
         self.tag = tag
         self.release = None
+        self.hide_draft_from_list = False
         self.assets = {}
         self.fail_upload = False
         self.fail_publish = False
@@ -85,7 +86,12 @@ class GitHub:
         if args[:4] == ("gh", "api", "--paginate", "--slurp"):
             if args[-1].endswith("/assets?per_page=100"):
                 return result(args, [list(self.assets.values())])
+            if self.hide_draft_from_list and self.release and self.release["draft"]:
+                return result(args, [[]])
             return result(args, [[self.release] if self.release else []])
+        if args[:3] == ("gh", "api", "graphql"):
+            assert args[-1] == f"tag={self.tag}"
+            return result(args, {"data": {"repository": {"release": self.release}}})
         if args[:3] == ("gh", "release", "create"):
             assert {"--draft", "--verify-tag", "--generate-notes"}.issubset(args)
             self.creations += 1
@@ -202,6 +208,7 @@ class ReleaseTests(TestCase):
 
     def test_github_partial_draft_and_lost_publish_response_are_recoverable(self):
         github, release = self.github("beta")
+        github.hide_draft_from_list = True
         github.fail_upload = True
         with self.assertRaisesRegex(release_apks.ReleaseError, "HTTP 502"):
             release.publish(self.directory)

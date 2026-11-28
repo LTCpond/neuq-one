@@ -169,7 +169,26 @@ class GitHubRelease:
         releases = [release for release in self.list(self.api) if release["tag_name"] == self.tag]
         if len(releases) > 1:
             raise ReleaseError(f"找到多个同标签 GitHub Release：{self.tag}")
-        release = releases[0] if releases else None
+        if releases:
+            release = releases[0]
+        else:
+            owner, name = REPOSITORY.split("/")
+            query = """
+                query($owner: String!, $name: String!, $tag: String!) {
+                  repository(owner: $owner, name: $name) {
+                    release(tagName: $tag) {
+                      id: databaseId
+                      draft: isDraft
+                      prerelease: isPrerelease
+                    }
+                  }
+                }
+            """
+            response = json.loads(self.gh(
+                "api", "graphql", "-f", f"query={query}",
+                "-f", f"owner={owner}", "-f", f"name={name}", "-f", f"tag={self.tag}",
+            ))
+            release = response["data"]["repository"]["release"]
         if release and release["prerelease"] != self.beta:
             raise ReleaseError(f"现有 GitHub Release 渠道冲突：{self.tag}")
         return release
@@ -205,7 +224,13 @@ class GitHubRelease:
                 flags += ["--notes-file", str(notes)]
             self.gh("release", "create", self.tag, "--repo", REPOSITORY,
                     "--draft", "--verify-tag", "--generate-notes", *flags)
-            release = self.find()
+            for delay in (1, 2, 4):
+                release = self.find()
+                if release is not None:
+                    break
+                sleep(delay)
+            else:
+                release = self.find()
             if release is None:
                 raise ReleaseError(f"暂时无法读取 GitHub Release 草稿：{self.tag}")
 
