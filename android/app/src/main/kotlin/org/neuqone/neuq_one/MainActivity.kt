@@ -17,14 +17,17 @@ import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugins.webviewflutter.WebViewFlutterAndroidExternalApi
 import io.flutter.plugin.common.MethodChannel
+import org.neuqone.neuq_one.widgets.WidgetDataBridge
 import java.net.URISyntaxException
 
 class MainActivity : FlutterActivity() {
     private var cameraPermissionResult: MethodChannel.Result? = null
     private var photoPickerResult: MethodChannel.Result? = null
+    private var widgetBridge: WidgetDataBridge? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        widgetBridge = WidgetDataBridge(this, flutterEngine.dartExecutor.binaryMessenger)
         MethodChannel(
             flutterEngine.dartExecutor.binaryMessenger,
             "org.neuqone.neuq_one/campus_network"
@@ -213,6 +216,17 @@ class MainActivity : FlutterActivity() {
                 grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED
             )
         }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        widgetBridge?.accept(intent)
+    }
+
+    override fun cleanUpFlutterEngine(flutterEngine: FlutterEngine) {
+        widgetBridge?.close()
+        widgetBridge = null
+        super.cleanUpFlutterEngine(flutterEngine)
     }
 
     override fun onDestroy() {

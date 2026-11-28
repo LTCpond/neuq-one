@@ -35,6 +35,7 @@ android {
         applicationId = "org.neuqone.neuq_one"
         minSdk = maxOf(flutter.minSdkVersion, 24)
         targetSdk = flutter.targetSdkVersion
+        testInstrumentationRunner = "org.neuqone.neuq_one.widgets.WidgetInstrumentation"
         // Uses the version code from pubspec.yaml. When using split APKs, 1000 * ABI_VERSION
         // is added automatically by Flutter. (https://developer.android.com/studio/build/configure-apk-splits#configure-APK-versions)
         // You can force using the value of versionCode by specifying the `-P force-version-code-ignoring-abi=true`

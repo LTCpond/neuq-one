@@ -19,9 +19,16 @@ const _darkCourseColors = [
 ];
 
 List<(Color, Color)> coursePalette(BuildContext context) =>
-    Theme.of(context).brightness == Brightness.dark
-    ? _darkCourseColors
-    : _lightCourseColors;
+    _palette(Theme.of(context).brightness);
+
+List<(Color, Color)> _palette(Brightness brightness) =>
+    brightness == Brightness.dark ? _darkCourseColors : _lightCourseColors;
+
+List<Color> coursePaletteColors(Brightness brightness, int index) {
+  final palette = _palette(brightness);
+  final (background, foreground) = palette[index % palette.length];
+  return [background, foreground];
+}
 
 (Color, Color) courseBlockColors(BuildContext context, int index) {
   final palette = coursePalette(context);

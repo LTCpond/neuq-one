@@ -17,14 +17,16 @@ final visibleTimetableProvider = Provider<AsyncValue<Timetable>>((ref) {
   final local = ref.watch(timetableProvider);
   final school = ref.watch(schoolTimetableCacheProvider).value?.data;
   if (school == null) return local;
-  return local.whenData(
-    (data) => Timetable(
-      [...school.semesters, ...data.semesters]
-        ..sort((a, b) => b.start.compareTo(a.start)),
-      [...school.courses, ...data.courses],
-    ),
-  );
+  return local.whenData((data) => mergeTimetable(data, school));
 });
+
+Timetable mergeTimetable(Timetable local, Timetable? school) => school == null
+    ? local
+    : Timetable(
+        [...school.semesters, ...local.semesters]
+          ..sort((a, b) => b.start.compareTo(a.start)),
+        [...school.courses, ...local.courses],
+      );
 
 class LocalTimetableRepository implements TimetableRepository {
   LocalTimetableRepository(this.db);

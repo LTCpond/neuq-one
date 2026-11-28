@@ -1,0 +1,4 @@
+<resources>
+    <string name="widget_exams_label">考试安排与倒计时</string>
+    <string name="widget_exams_description">查看最近的考试安排</string>
+</resources>

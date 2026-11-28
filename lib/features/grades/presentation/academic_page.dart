@@ -4,7 +4,9 @@ import 'package:material_ui/material_ui.dart';
 import '../../../core/database/school_data.dart';
 import '../../../core/widgets/campus_components.dart';
 import '../../../core/widgets/campus_segmented_picker.dart';
+import '../../exams/data/local_exams.dart';
 import '../../exams/presentation/exams_section.dart';
+import '../../timetable/data/local_timetable.dart';
 import '../data/local_grades.dart';
 import 'grades_section.dart';
 import 'grades_view.dart';
@@ -23,15 +25,31 @@ enum AcademicSection {
 /// Sections load lazily, stay alive after their first visit and own their own
 /// data, filters and scroll position.
 class AcademicPage extends ConsumerStatefulWidget {
-  const AcademicPage({super.key});
+  const AcademicPage({super.key, this.examRequest, this.addExam = false});
+
+  final String? examRequest;
+  final bool addExam;
 
   @override
   ConsumerState<AcademicPage> createState() => _AcademicPageState();
 }
 
 class _AcademicPageState extends ConsumerState<AcademicPage> {
-  var _selection = AcademicSection.grades;
-  final _visited = {AcademicSection.grades};
+  late var _selection = widget.examRequest == null
+      ? AcademicSection.grades
+      : AcademicSection.exams;
+  late final _visited = {AcademicSection.grades, _selection};
+  String? _handledAddRequest;
+
+  @override
+  void didUpdateWidget(covariant AcademicPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.examRequest != null &&
+        widget.examRequest != oldWidget.examRequest) {
+      _visited.add(AcademicSection.exams);
+      _selection = AcademicSection.exams;
+    }
+  }
 
   void _select(AcademicSection section) {
     if (section == _selection) return;
@@ -43,6 +61,22 @@ class _AcademicPageState extends ConsumerState<AcademicPage> {
 
   @override
   Widget build(BuildContext context) {
+    final request = widget.examRequest;
+    if (widget.addExam && request != null && _handledAddRequest != request) {
+      _handledAddRequest = request;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted || widget.examRequest != request || !widget.addExam) {
+          return;
+        }
+        showExamEditor(
+          context,
+          repository: ref.read(examRepositoryProvider),
+          subjects: currentSemesterSubjects(
+            ref.read(visibleTimetableProvider).value,
+          ),
+        );
+      });
+    }
     final semesters = ref.watch(gradeSemestersProvider);
     final semesterSelection = ref.watch(gradesSemesterSelectionProvider);
     final term = selectedGradeSemester(semesters, semesterSelection);

@@ -1,4 +1,5 @@
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -9,6 +10,7 @@ import '../core/network/campus_access/campus_access_providers.dart';
 import '../core/network/campus_access/webvpn_session_manager.dart';
 import '../core/storage/settings.dart';
 import '../core/theme/app_theme.dart';
+import '../features/desktop_widgets/data/desktop_widget_bridge.dart';
 import '../features/profile/data/course_reminders.dart';
 import '../features/profile/data/app_updates.dart';
 import 'router.dart';
@@ -27,10 +29,14 @@ class _NeuqOneAppState extends ConsumerState<NeuqOneApp> {
   DateTime? _backgroundedAt;
   late final AppLifecycleListener _lifecycle;
   late final WebVpnSessionManager _webVpn;
+  int _widgetRequest = 0;
 
   @override
   void initState() {
     super.initState();
+    if (supportsDesktopWidgets) {
+      desktopWidgetChannel.setMethodCallHandler(_onWidgetMessage);
+    }
     _webVpn = ref.read(webVpnSessionManagerProvider);
     final state = WidgetsBinding.instance.lifecycleState;
     _setCampusForeground(state == null || state == AppLifecycleState.resumed);
@@ -50,6 +56,26 @@ class _NeuqOneAppState extends ConsumerState<NeuqOneApp> {
         _startUpdateCheck();
       },
     );
+  }
+
+  Future<void> _onWidgetMessage(MethodCall call) async {
+    if (call.method != 'navigationAvailable' || !mounted) return;
+    final subject = ref.read(schoolSessionProvider).asData?.value?.subject;
+    if (subject == null) return;
+    try {
+      final target = await desktopWidgetChannel
+          .invokeMapMethod<Object?, Object?>('takeNavigation');
+      if (!mounted ||
+          target == null ||
+          ref.read(schoolSessionProvider).asData?.value?.subject != subject ||
+          ref.read(schoolNetworkBoundaryProvider).signingOut) {
+        return;
+      }
+      final location = desktopWidgetLocation(target, ++_widgetRequest);
+      if (location != null) ref.read(routerProvider).go(location.toString());
+    } on PlatformException {
+      // The regular app route remains available if the widget state expired.
+    }
   }
 
   void _recordBackgroundTime() {
@@ -129,12 +155,14 @@ class _NeuqOneAppState extends ConsumerState<NeuqOneApp> {
 
   @override
   void dispose() {
+    if (supportsDesktopWidgets) desktopWidgetChannel.setMethodCallHandler(null);
     _lifecycle.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
+    ref.watch(desktopWidgetSyncProvider);
     if (_restoringSession) {
       _restoringSession = ref.watch(
         schoolSessionProvider.select((session) => session.isLoading),

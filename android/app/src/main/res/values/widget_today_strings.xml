@@ -1,0 +1,4 @@
+<resources>
+    <string name="widget_today_label">今日课表</string>
+    <string name="widget_today_description">查看当天课程与上课地点</string>
+</resources>

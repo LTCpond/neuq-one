@@ -20,7 +20,9 @@ import 'timetable_palette.dart';
 import 'week_timetable.dart';
 
 class TimetablePage extends ConsumerStatefulWidget {
-  const TimetablePage({super.key});
+  const TimetablePage({super.key, this.widgetCourse});
+
+  final ({String id, String request})? widgetCourse;
 
   @override
   ConsumerState<TimetablePage> createState() => _TimetablePageState();
@@ -29,6 +31,30 @@ class TimetablePage extends ConsumerStatefulWidget {
 class _TimetablePageState extends ConsumerState<TimetablePage> {
   String? _semesterId;
   int? _week;
+  String? _openedWidgetRequest;
+
+  void _openWidgetCourse(Timetable? data, TimetableRepository repository) {
+    final target = widget.widgetCourse;
+    if (target == null ||
+        data == null ||
+        _openedWidgetRequest == target.request) {
+      return;
+    }
+    final course = data.courses
+        .where((course) => course.id == target.id)
+        .firstOrNull;
+    if (course == null) return;
+    final term = data.semesters
+        .where((term) => term.id == course.semesterId)
+        .firstOrNull;
+    if (term == null) return;
+    _openedWidgetRequest = target.request;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && widget.widgetCourse == target) {
+        showCourseDetails(context, repository, term, course);
+      }
+    });
+  }
 
   Future<void> _export(Semester semester, List<Course> courses) async {
     if (courses.isEmpty) {
@@ -50,6 +76,7 @@ class _TimetablePageState extends ConsumerState<TimetablePage> {
   Widget build(BuildContext context) {
     final data = ref.watch(visibleTimetableProvider);
     final repository = ref.watch(timetableRepositoryProvider);
+    _openWidgetCourse(data.asData?.value, repository);
     final terms = data.value?.semesters ?? [];
     final today = ref.watch(timetableDateProvider);
     final semester =

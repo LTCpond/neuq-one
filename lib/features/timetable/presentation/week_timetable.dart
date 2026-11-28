@@ -3,6 +3,7 @@ import 'package:material_ui/material_ui.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/time/campus_clock.dart';
 import '../../../core/time/neuq_periods.dart';
+import '../domain/course_period_span.dart';
 import '../domain/timetable.dart';
 import 'timetable_palette.dart';
 
@@ -654,23 +655,8 @@ typedef _Block = ({Course course, int start, int end, int lane, int lanes});
 List<_Block> _placeCourses(List<Course> courses) {
   final positions = [
     for (final course in courses)
-      (
-        course: course,
-        start:
-            (periodAtStart(course.startMinute) ??
-                    neuqPeriods
-                            .where((period) => course.startMinute >= period.end)
-                            .length +
-                        1)
-                .clamp(1, neuqPeriods.length) -
-            1,
-        end:
-            periodAtEnd(course.endMinute) ??
-            neuqPeriods
-                .where((period) => course.endMinute > period.start)
-                .length,
-      ),
-  ]..sort((a, b) => a.start.compareTo(b.start));
+      (course: course, span: coursePeriodSpan(course)),
+  ]..sort((a, b) => a.span.start.compareTo(b.span.start));
   final result = <_Block>[];
   final ends = <int>[];
   final group = <_Block>[];
@@ -689,8 +675,7 @@ List<_Block> _placeCourses(List<Course> courses) {
   }
 
   for (final position in positions) {
-    final start = position.start;
-    final end = position.end.clamp(start + 1, neuqPeriods.length);
+    final (start: start, end: end) = position.span;
     if (ends.every((point) => point <= start)) finishGroup();
     var lane = ends.indexWhere((point) => point <= start);
     if (lane == -1) {

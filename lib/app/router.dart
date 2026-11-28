@@ -76,7 +76,29 @@ final routerProvider = Provider<GoRouter>((ref) {
               routes: [
                 GoRoute(
                   path: tab.path,
-                  builder: (context, state) => tab.page,
+                  builder: (context, state) {
+                    final request = state.uri.queryParameters['widget'];
+                    if (tab.path == _gradesPath &&
+                        state.uri.queryParameters['section'] == 'exams') {
+                      return AcademicPage(
+                        examRequest: request ?? '',
+                        addExam:
+                            request != null &&
+                            state.uri.queryParameters['add'] == '1',
+                      );
+                    }
+                    final course = state.uri.queryParameters['course'];
+                    if (tab.path == _timetablePath &&
+                        course != null &&
+                        course.isNotEmpty &&
+                        course.length <= 512 &&
+                        request != null) {
+                      return TimetablePage(
+                        widgetCourse: (id: course, request: request),
+                      );
+                    }
+                    return tab.page;
+                  },
                   routes: [
                     if (tab.path == _gradesPath)
                       GoRoute(

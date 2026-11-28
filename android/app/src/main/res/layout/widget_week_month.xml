@@ -1,0 +1,6 @@
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android" android:layout_width="32dp" android:layout_height="match_parent" android:orientation="horizontal"  >
+    <FrameLayout android:id="@+id/widget_column" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1">
+        <TextView android:id="@+id/widget_month" android:layout_width="match_parent" android:layout_height="match_parent" android:textColor="@color/widget_muted" android:textSize="9sp" android:includeFontPadding="false" android:maxLines="1" android:ellipsize="end" android:gravity="center" />
+    </FrameLayout>
+    <ImageView android:id="@+id/widget_column_border" android:layout_width="1dp" android:layout_height="match_parent" android:src="@drawable/widget_grid_stroke" android:importantForAccessibility="no" android:scaleType="fitXY" />
+</LinearLayout>

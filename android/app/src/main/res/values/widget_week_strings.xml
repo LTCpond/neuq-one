@@ -1,0 +1,4 @@
+<resources>
+    <string name="widget_week_label">周课表</string>
+    <string name="widget_week_description">查看七天十二节次，可切换教学周</string>
+</resources>

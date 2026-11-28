@@ -1,0 +1,15 @@
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android" android:id="@+id/widget_root" android:layout_width="match_parent" android:layout_height="match_parent" android:background="@drawable/widget_surface" android:clipToOutline="true" android:padding="10dp">
+    <LinearLayout android:id="@+id/widget_row_click" android:layout_width="match_parent" android:layout_height="match_parent" android:orientation="horizontal" android:gravity="center_vertical">
+        <FrameLayout android:layout_width="wrap_content" android:layout_height="wrap_content">
+            <LinearLayout android:layout_width="wrap_content" android:layout_height="wrap_content" android:orientation="vertical" android:gravity="center" android:layout_marginEnd="7dp">
+                <TextView android:id="@+id/widget_count" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textColor="@color/widget_brand" android:textSize="28sp" android:includeFontPadding="false" android:maxLines="1" android:ellipsize="end" android:textStyle="bold"  />
+                <TextView android:id="@+id/widget_unit" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textColor="@color/widget_brand" android:textSize="11sp" android:includeFontPadding="false" android:maxLines="1" android:ellipsize="end"  />
+            </LinearLayout>
+        </FrameLayout>
+        <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:orientation="vertical" android:layout_weight="1">
+            <TextView android:id="@+id/widget_exam_name" android:layout_width="match_parent" android:layout_height="17dp" android:textColor="@color/widget_primary" android:textSize="14sp" android:includeFontPadding="false" android:maxLines="1" android:ellipsize="end" android:textStyle="bold" android:autoSizeTextType="uniform" android:autoSizeMinTextSize="10sp" android:autoSizeMaxTextSize="14sp" android:autoSizeStepGranularity="1sp"  />
+            <TextView android:id="@+id/widget_exam_time" android:layout_width="match_parent" android:layout_height="14dp" android:textColor="@color/widget_muted" android:textSize="11sp" android:includeFontPadding="false" android:maxLines="1" android:ellipsize="end" android:autoSizeTextType="uniform" android:autoSizeMinTextSize="9sp" android:autoSizeMaxTextSize="11sp" android:autoSizeStepGranularity="1sp"  />
+            <TextView android:id="@+id/widget_exam_room" android:layout_width="match_parent" android:layout_height="14dp" android:textColor="@color/widget_muted" android:textSize="11sp" android:includeFontPadding="false" android:maxLines="1" android:ellipsize="end" android:autoSizeTextType="uniform" android:autoSizeMinTextSize="10sp" android:autoSizeMaxTextSize="11sp" android:autoSizeStepGranularity="1sp"  />
+        </LinearLayout>
+    </LinearLayout>
+</FrameLayout>

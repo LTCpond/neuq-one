@@ -1,0 +1,10 @@
+<resources>
+    <color name="widget_surface">#202A38</color>
+    <color name="widget_brand">#9AB5FF</color>
+    <color name="widget_primary">#E9EFFA</color>
+    <color name="widget_muted">#A7B4C7</color>
+    <color name="widget_grid">#344154</color>
+    <color name="widget_highlight">#293954</color>
+    <color name="widget_warning">#FFC185</color>
+    <color name="widget_on_brand">#18243B</color>
+</resources>

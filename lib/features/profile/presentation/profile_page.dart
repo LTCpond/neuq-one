@@ -10,6 +10,8 @@ import '../../../core/storage/settings.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/widgets/campus_components.dart';
 import '../../../core/widgets/screen.dart';
+import '../../desktop_widgets/data/desktop_widget_bridge.dart';
+import '../../desktop_widgets/presentation/desktop_widgets_page.dart';
 import '../data/app_updates.dart';
 import '../data/course_reminders.dart';
 import 'cache_management_page.dart';
@@ -192,6 +194,17 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
                         onTap: () =>
                             _openSettings(const ReminderSettingsPage()),
                       ),
+                      if (supportsDesktopWidgets) ...[
+                        const SizedBox(height: 6),
+                        _ProfileTile(
+                          icon: const Icon(Icons.widgets_outlined),
+                          title: '桌面小组件',
+                          subtitle: '预览 Android 桌面小组件',
+                          accent: (colors.primaryContainer, colors.primary),
+                          onTap: () =>
+                              _openSettings(const DesktopWidgetsPage()),
+                        ),
+                      ],
                     ],
                   ),
                 ),
