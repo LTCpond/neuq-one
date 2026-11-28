@@ -112,6 +112,43 @@ void main() {
     expect(await repository.watch().first, isEmpty);
   });
 
+  test('local exams reject invalid or cross-day time ranges', () async {
+    final db = AppDatabase(NativeDatabase.memory());
+    addTearDown(db.close);
+    final repository = LocalExamRepository(db);
+    Exam exam(String id, DateTime at, DateTime endsAt) =>
+        Exam(id: id, name: '考试', at: at, endsAt: endsAt);
+
+    for (final (id, at, endsAt) in [
+      ('same', DateTime.utc(2026, 11, 27, 1), DateTime.utc(2026, 11, 27, 1)),
+      ('earlier', DateTime.utc(2026, 11, 27, 2), DateTime.utc(2026, 11, 27, 1)),
+      (
+        'cross-day',
+        DateTime.utc(2026, 11, 27, 15),
+        DateTime.utc(2026, 11, 27, 17),
+      ),
+    ]) {
+      await expectLater(
+        repository.save(exam(id, at, endsAt)),
+        throwsA(
+          isA<FormatException>().having(
+            (error) => error.message,
+            'message',
+            examTimeError,
+          ),
+        ),
+      );
+    }
+    await repository.save(
+      exam(
+        'valid',
+        DateTime.utc(2026, 11, 27, 1),
+        DateTime.utc(2026, 11, 27, 3),
+      ),
+    );
+    expect((await repository.watch().first).single.id, 'valid');
+  });
+
   test('version 2 exams gain a default end time during migration', () async {
     final db = AppDatabase(
       NativeDatabase.memory(

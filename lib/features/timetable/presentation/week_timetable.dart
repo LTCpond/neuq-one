@@ -9,6 +9,9 @@ import '../domain/timetable.dart';
 import 'timetable_palette.dart';
 
 const _weekHeaderHeight = 54.0;
+const _examMarkerWidth = 21.0;
+const _examMarkerHeight = 3.0;
+const _examMarkerSlotHeight = 9.0;
 
 class WeekMenu extends StatelessWidget {
   const WeekMenu({
@@ -580,6 +583,10 @@ class _DayColumn extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final colors = theme.colorScheme;
+    final examEvents = [for (final block in day.exams) ...block.group.events];
+    final hasExams = examEvents.isNotEmpty;
+    final examsFinished =
+        hasExams && examEvents.every((event) => event.exam!.isFinishedAt(now));
     return DecoratedBox(
       decoration: BoxDecoration(
         border: Border(
@@ -613,6 +620,7 @@ class _DayColumn extends StatelessWidget {
                   ),
                   const SizedBox(height: 2),
                   Container(
+                    key: ValueKey('timetable-date-badge-$date'),
                     alignment: Alignment.center,
                     height: 22,
                     width: 24,
@@ -628,19 +636,33 @@ class _DayColumn extends StatelessWidget {
                       ),
                     ),
                   ),
-                  if (day.exams.any((exam) => exam.supplement))
-                    Semantics(
-                      label: '有补充考试时段',
-                      child: Container(
-                        margin: const EdgeInsets.only(top: 2),
-                        width: 4,
-                        height: 4,
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          color: examPalette(theme.brightness).text,
-                        ),
-                      ),
-                    ),
+                  SizedBox(
+                    key: ValueKey('timetable-exam-marker-slot-$date'),
+                    height: _examMarkerSlotHeight,
+                    child: hasExams
+                        ? Semantics(
+                            label: examsFinished ? '当天考试已结束' : '当天有考试',
+                            child: Align(
+                              alignment: Alignment.topCenter,
+                              child: Padding(
+                                padding: const EdgeInsets.only(top: 3),
+                                child: Container(
+                                  key: ValueKey('timetable-exam-marker-$date'),
+                                  width: _examMarkerWidth,
+                                  height: _examMarkerHeight,
+                                  decoration: BoxDecoration(
+                                    color: examDateMarkerColor(
+                                      context,
+                                      finished: examsFinished,
+                                    ),
+                                    borderRadius: BorderRadius.circular(2),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          )
+                        : null,
+                  ),
                 ],
               ),
             ),

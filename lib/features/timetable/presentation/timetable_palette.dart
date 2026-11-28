@@ -47,6 +47,13 @@ ExamPalette examPalette(Brightness brightness, {bool finished = false}) {
   );
 }
 
+/// The short line under a timetable date. It reuses the exam theme red until
+/// every exam that day has ended, then fades to the neutral outline color.
+Color examDateMarkerColor(BuildContext context, {required bool finished}) {
+  final colors = Theme.of(context).colorScheme;
+  return finished ? colors.outline : examPalette(colors.brightness).border;
+}
+
 List<(Color, Color)> coursePalette(BuildContext context) =>
     _palette(Theme.of(context).brightness);
 

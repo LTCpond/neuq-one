@@ -26,16 +26,37 @@ final scheduleConflictsProvider = Provider.autoDispose<ScheduleConflicts>(
   (ref) => ScheduleConflicts(ref.watch(scheduleEventsProvider)),
 );
 
-final scheduleCourseCheckProvider = Provider.autoDispose<String>((ref) {
-  final hasSchoolCache = ref.watch(
-    schoolTimetableCacheProvider.select((state) => state.value != null),
-  );
-  final localError = ref.watch(
-    timetableProvider.select((state) => state.hasError),
-  );
-  if (!hasSchoolCache || localError) return '课表尚未完整读取，暂时无法完整检测课程冲突。';
-  return '冲突检测依据本地课表缓存，教务课程安排请以学校为准。';
-});
+enum ScheduleCourseCheck { complete, incomplete }
+
+class ScheduleCourseCheckStatus {
+  const ScheduleCourseCheckStatus(this.condition);
+
+  final ScheduleCourseCheck condition;
+
+  bool get complete => condition == ScheduleCourseCheck.complete;
+
+  /// The extra explanation is only needed when conflict detection could miss
+  /// courses. A complete local cache adds no footer to the exam editor.
+  String? get message => switch (condition) {
+    ScheduleCourseCheck.complete => null,
+    ScheduleCourseCheck.incomplete => '课表尚未完整读取，暂时无法完整检测课程冲突。',
+  };
+}
+
+final scheduleCourseCheckProvider =
+    Provider.autoDispose<ScheduleCourseCheckStatus>((ref) {
+      final hasSchoolCache = ref.watch(
+        schoolTimetableCacheProvider.select((state) => state.value != null),
+      );
+      final localError = ref.watch(
+        timetableProvider.select((state) => state.hasError),
+      );
+      return ScheduleCourseCheckStatus(
+        hasSchoolCache && !localError
+            ? ScheduleCourseCheck.complete
+            : ScheduleCourseCheck.incomplete,
+      );
+    });
 
 /// Campus wall-clock time, refreshed only at midnight, exam ends and resume.
 final scheduleClockProvider = Provider.autoDispose<DateTime>((ref) {

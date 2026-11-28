@@ -7,25 +7,63 @@ import '../../../core/storage/settings.dart';
 import '../../../core/time/campus_clock.dart';
 import '../../../core/widgets/campus_components.dart';
 import '../../../core/widgets/screen.dart';
-import '../data/course_reminders.dart';
+import '../../profile/data/course_reminders.dart';
 
-String reminderStatusLabel(AsyncValue<ReminderStatus> status) =>
-    status.isLoading ? '正在设置' : status.value?.label ?? '排程失败，可重试';
-
-class ReminderSettingsPage extends ConsumerStatefulWidget {
-  const ReminderSettingsPage({super.key});
+/// Unified timetable preferences: exam display, course reminders and exam
+/// conflict notifications. All three switches use the existing settings fields
+/// so upgrades keep the user's previous choices.
+class TimetableSettingsPage extends ConsumerStatefulWidget {
+  const TimetableSettingsPage({super.key});
 
   @override
-  ConsumerState<ReminderSettingsPage> createState() =>
-      _ReminderSettingsPageState();
+  ConsumerState<TimetableSettingsPage> createState() =>
+      _TimetableSettingsPageState();
 }
 
-class _ReminderSettingsPageState extends ConsumerState<ReminderSettingsPage> {
+class _TimetableSettingsPageState extends ConsumerState<TimetableSettingsPage>
+    with WidgetsBindingObserver {
   bool _busy = false;
+  bool? _notificationsAllowed;
+
+  SettingsController get _settings => ref.read(settingsProvider.notifier);
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    WidgetsBinding.instance.addPostFrameCallback(
+      (_) => _refreshNotificationPermission(),
+    );
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) _refreshNotificationPermission();
+  }
+
+  Future<void> _refreshNotificationPermission() async {
+    if (!mounted) return;
+    final service = ref.read(reminderServiceProvider);
+    if (!service.supported) return;
+    var allowed = false;
+    try {
+      allowed = await service.notificationsAllowed();
+    } on Object {
+      // Diagnostics already record platform failures; keep the request entry.
+    }
+    if (mounted) setState(() => _notificationsAllowed = allowed);
+  }
 
   Future<void> _run(
-    Future<String?> Function(CourseReminderService) action,
-  ) async {
+    Future<String?> Function(CourseReminderService) action, {
+    bool refreshReminders = true,
+  }) async {
     if (_busy) return;
     setState(() => _busy = true);
     try {
@@ -48,20 +86,51 @@ class _ReminderSettingsPageState extends ConsumerState<ReminderSettingsPage> {
       if (mounted) showMessage(context, message);
     } finally {
       if (mounted) {
-        ref.invalidate(reminderSyncProvider);
+        if (refreshReminders) ref.invalidate(reminderSyncProvider);
         setState(() => _busy = false);
+        _refreshNotificationPermission();
       }
     }
   }
 
+  Future<void> _setShowExams(bool enabled) => _run((_) async {
+    await _settings.setShowExamsInTimetable(enabled);
+    return null;
+  }, refreshReminders: false);
+
+  Future<void> _setCourseReminders(bool enabled) => _run((service) async {
+    if (!enabled) {
+      await _settings.setReminder(0);
+      return null;
+    }
+    await _settings.setReminder(10);
+    return await service.requestPermission()
+        ? null
+        : '请在系统设置中允许 NEUQ One 的课程提醒通知。';
+  });
+
   Future<void> _setLead(int minutes) => _run((service) async {
     final previous = ref.read(settingsProvider).value?.reminderMinutes ?? 0;
-    await ref.read(settingsProvider.notifier).setReminder(minutes);
+    await _settings.setReminder(minutes);
     if (minutes == 0 || previous > 0) return null;
     return await service.requestPermission()
         ? null
         : '请在系统设置中允许 NEUQ One 的课程提醒通知。';
   });
+
+  Future<void> _setExamConflictReminders(bool enabled) => _run((service) async {
+    await _settings.setExamConflictReminders(enabled);
+    if (!enabled) return null;
+    return await service.requestPermission()
+        ? null
+        : '请在系统设置中允许 NEUQ One 的考试冲突提醒通知。';
+  }, refreshReminders: false);
+
+  Future<void> _requestNotificationPermission() => _run(
+    (service) async => await service.requestPermission()
+        ? '通知权限已开启。'
+        : '通知权限未开启，请在系统设置中允许 NEUQ One 的通知。',
+  );
 
   @override
   Widget build(BuildContext context) {
@@ -77,8 +146,9 @@ class _ReminderSettingsPageState extends ConsumerState<ReminderSettingsPage> {
         result?.condition == ReminderCondition.partialFailure;
     final loading = _busy || status.isLoading;
     final locked = _busy || settings == null;
+    final remindersAvailable = !locked && service.supported;
     return Scaffold(
-      appBar: AppBar(title: const Text('课程提醒')),
+      appBar: AppBar(title: const Text('课表设置')),
       body: SafeArea(
         top: false,
         child: Column(
@@ -88,80 +158,99 @@ class _ReminderSettingsPageState extends ConsumerState<ReminderSettingsPage> {
               child: ListView(
                 padding: const EdgeInsets.fromLTRB(16, 4, 16, 28),
                 children: [
-                  _ReminderStatusCard(
-                    status: result,
-                    loading: loading,
-                    busy: _busy,
-                  ),
-                  const SizedBox(height: 22),
-                  const _SettingsHeading('提醒时间'),
+                  const _SettingsHeading('显示设置'),
                   const SizedBox(height: 8),
                   Card(
-                    child: Padding(
-                      padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            children: [
-                              Icon(
-                                Icons.schedule_rounded,
-                                size: 20,
-                                color: colors.primary,
-                              ),
-                              const SizedBox(width: 8),
-                              Expanded(
-                                child: Text(
-                                  '上课前提醒',
-                                  style: theme.textTheme.titleMedium,
-                                ),
-                              ),
-                              Text(
-                                lead == 0 ? '已关闭' : '提前 $lead 分钟',
-                                style: theme.textTheme.labelMedium?.copyWith(
-                                  color: colors.onSurfaceVariant,
-                                ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            service.supported
-                                ? '选择在课程开始前多久推送本地通知。'
-                                : '当前设备不支持本地通知，无法接收课程提醒。',
-                            style: theme.textTheme.bodySmall?.copyWith(
-                              color: colors.onSurfaceVariant,
-                              height: 1.45,
-                            ),
-                          ),
-                          const SizedBox(height: 12),
-                          Wrap(
-                            spacing: 8,
-                            runSpacing: 8,
-                            children: [
-                              for (final minutes in const [0, 5, 10, 15, 30])
-                                ChoiceChip(
-                                  label: Text(
-                                    minutes == 0 ? '关闭' : '$minutes 分钟',
-                                  ),
-                                  selected: lead == minutes,
-                                  showCheckmark: false,
-                                  visualDensity: VisualDensity.compact,
-                                  onSelected: locked || !service.supported
-                                      ? null
-                                      : (_) => _setLead(minutes),
-                                ),
-                            ],
-                          ),
-                        ],
-                      ),
+                    child: SwitchListTile(
+                      title: const Text('在课表中显示考试'),
+                      subtitle: const Text('在周课表中展示考试安排'),
+                      value: settings?.showExamsInTimetable ?? true,
+                      onChanged: locked ? null : _setShowExams,
                     ),
                   ),
-                  if (service.isAndroid && lead > 0) ...[
-                    const SizedBox(height: 10),
-                    Card(
-                      child: Column(
-                        children: [
+                  const SizedBox(height: 22),
+                  const _SettingsHeading('通知提醒'),
+                  const SizedBox(height: 8),
+                  Card(
+                    child: Column(
+                      children: [
+                        SwitchListTile(
+                          title: const Text('课程提醒'),
+                          subtitle: const Text('在课程开始前发送通知'),
+                          value: lead > 0,
+                          onChanged: remindersAvailable
+                              ? _setCourseReminders
+                              : null,
+                        ),
+                        const Divider(height: 1, indent: 16, endIndent: 16),
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  Icon(
+                                    Icons.schedule_rounded,
+                                    size: 20,
+                                    color: colors.primary,
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Expanded(
+                                    child: Text(
+                                      '上课前提醒',
+                                      style: theme.textTheme.titleMedium,
+                                    ),
+                                  ),
+                                  Text(
+                                    lead == 0 ? '已关闭' : '提前 $lead 分钟',
+                                    style: theme.textTheme.labelMedium
+                                        ?.copyWith(
+                                          color: colors.onSurfaceVariant,
+                                        ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                service.supported
+                                    ? '选择在课程开始前多久推送本地通知。'
+                                    : '当前设备不支持本地通知，无法接收课程提醒。',
+                                style: theme.textTheme.bodySmall?.copyWith(
+                                  color: colors.onSurfaceVariant,
+                                  height: 1.45,
+                                ),
+                              ),
+                              const SizedBox(height: 12),
+                              Wrap(
+                                spacing: 8,
+                                runSpacing: 8,
+                                children: [
+                                  for (final minutes in const [
+                                    0,
+                                    5,
+                                    10,
+                                    15,
+                                    30,
+                                  ])
+                                    ChoiceChip(
+                                      label: Text(
+                                        minutes == 0 ? '关闭' : '$minutes 分钟',
+                                      ),
+                                      selected: lead == minutes,
+                                      showCheckmark: false,
+                                      visualDensity: VisualDensity.compact,
+                                      onSelected: remindersAvailable
+                                          ? (_) => _setLead(minutes)
+                                          : null,
+                                    ),
+                                ],
+                              ),
+                            ],
+                          ),
+                        ),
+                        if (service.isAndroid && lead > 0) ...[
+                          const Divider(height: 1, indent: 16, endIndent: 16),
                           ListTile(
                             contentPadding: const EdgeInsets.symmetric(
                               horizontal: 16,
@@ -184,25 +273,41 @@ class _ReminderSettingsPageState extends ConsumerState<ReminderSettingsPage> {
                             contentPadding: const EdgeInsets.symmetric(
                               horizontal: 16,
                             ),
-                            secondary: const Icon(Icons.timer_outlined),
                             title: const Text('允许非精确定时'),
                             subtitle: const Text('精确定时不可用时采用，系统可能延迟提醒'),
                             value: settings?.allowInexactReminders ?? false,
                             onChanged: _busy
                                 ? null
                                 : (enabled) => _run((_) async {
-                                    await ref
-                                        .read(settingsProvider.notifier)
-                                        .setInexactReminders(enabled);
+                                    await _settings.setInexactReminders(
+                                      enabled,
+                                    );
                                     return null;
                                   }),
                           ),
                         ],
-                      ),
+                      ],
                     ),
-                  ],
+                  ),
+                  const SizedBox(height: 10),
+                  _ReminderStatusCard(
+                    status: result,
+                    loading: loading,
+                    busy: _busy,
+                  ),
+                  const SizedBox(height: 10),
+                  Card(
+                    child: SwitchListTile(
+                      title: const Text('考试冲突提醒'),
+                      subtitle: const Text('教务课表更新后发现新增考试冲突时通知'),
+                      value: settings?.examConflictReminders ?? true,
+                      onChanged: remindersAvailable
+                          ? _setExamConflictReminders
+                          : null,
+                    ),
+                  ),
                   const SizedBox(height: 22),
-                  const _SettingsHeading('通知检查'),
+                  const _SettingsHeading('通知诊断'),
                   const SizedBox(height: 8),
                   Card(
                     child: Column(
@@ -211,22 +316,43 @@ class _ReminderSettingsPageState extends ConsumerState<ReminderSettingsPage> {
                           contentPadding: const EdgeInsets.symmetric(
                             horizontal: 16,
                           ),
+                          leading: const Icon(Icons.notifications_outlined),
+                          title: const Text('通知权限'),
+                          subtitle: Text(
+                            !service.supported
+                                ? '当前设备不支持本地通知'
+                                : switch (_notificationsAllowed) {
+                                    null => '正在检查通知权限…',
+                                    true => '已允许，课程提醒与考试冲突提醒可正常送达',
+                                    false => '未允许，点击申请通知权限',
+                                  },
+                          ),
+                          trailing: const Icon(Icons.chevron_right_rounded),
+                          onTap: remindersAvailable
+                              ? _requestNotificationPermission
+                              : null,
+                        ),
+                        const Divider(height: 1, indent: 16, endIndent: 16),
+                        ListTile(
+                          contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                          ),
                           leading: const Icon(Icons.send_outlined),
                           title: const Text('发送测试通知'),
                           subtitle: const Text('立即验证提醒能否送达通知中心'),
                           trailing: const Icon(Icons.chevron_right_rounded),
-                          onTap: _busy || !service.supported
-                              ? null
-                              : () => _run((service) async {
+                          onTap: remindersAvailable
+                              ? () => _run((service) async {
                                   return switch (await service.sendTest()) {
                                     ReminderTestResult.submitted =>
                                       '已向系统提交测试通知，请查看通知中心。',
                                     ReminderTestResult.permissionDenied =>
-                                      '请在系统设置中允许 NEUQ One 的课程提醒通知。',
+                                      '请在系统设置中允许 NEUQ One 的通知。',
                                     ReminderTestResult.unsupported =>
                                       '当前设备不支持测试通知。',
                                   };
-                                }),
+                                })
+                              : null,
                         ),
                         const Divider(height: 1, indent: 16, endIndent: 16),
                         ListTile(
@@ -237,14 +363,14 @@ class _ReminderSettingsPageState extends ConsumerState<ReminderSettingsPage> {
                           title: const Text('打开系统通知设置'),
                           subtitle: const Text('管理通知权限与提醒渠道'),
                           trailing: const Icon(Icons.open_in_new, size: 18),
-                          onTap: _busy || !service.supported
-                              ? null
-                              : () => _run(
+                          onTap: remindersAvailable
+                              ? () => _run(
                                   (service) async =>
                                       await service.openNotificationSettings()
                                       ? null
-                                      : '请在设备设置中找到 NEUQ One，打开课程提醒通知。',
-                                ),
+                                      : '请在设备设置中找到 NEUQ One，打开通知。',
+                                )
+                              : null,
                         ),
                         if (failed) ...[
                           const Divider(height: 1, indent: 16, endIndent: 16),

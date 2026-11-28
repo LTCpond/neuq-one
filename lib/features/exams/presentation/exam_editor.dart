@@ -72,7 +72,6 @@ class _ExamEditorState extends ConsumerState<_ExamEditor> {
   late final TextEditingController _name;
   late final TextEditingController _room;
   late DateTime _date;
-  late DateTime _endDate;
   late int _startMinute;
   late int _endMinute;
   late String _subject;
@@ -90,12 +89,10 @@ class _ExamEditorState extends ConsumerState<_ExamEditor> {
     _room = TextEditingController(text: exam?.room ?? '');
     if (exam == null) {
       _date = calendarDate(campusNow());
-      _endDate = _date;
       _startMinute = 9 * 60;
       _endMinute = 11 * 60;
     } else {
       _date = exam.campusDate;
-      _endDate = calendarDate(exam.campusEnd);
       _startMinute = exam.campusStart.hour * 60 + exam.campusStart.minute;
       _endMinute = exam.campusEnd.hour * 60 + exam.campusEnd.minute;
     }
@@ -110,7 +107,7 @@ class _ExamEditorState extends ConsumerState<_ExamEditor> {
 
   ScheduleInterval get _time => ScheduleInterval(
     campusInstant(_date, _startMinute),
-    campusInstant(_endDate, _endMinute),
+    campusInstant(_date, _endMinute),
   );
 
   String _conflictKey(ScheduleEvent event) =>
@@ -118,8 +115,8 @@ class _ExamEditorState extends ConsumerState<_ExamEditor> {
 
   Future<void> _save(List<ScheduleEvent> preview) async {
     final time = _time;
-    if (!time.isValid) {
-      throw const FormatException('结束时间需晚于开始时间');
+    if (examTimeValidation(time.start, time.end) case final error?) {
+      throw FormatException(error);
     }
     final name = _custom ? _name.text.trim() : _subject;
     if (name.isEmpty) throw const FormatException('请输入考试科目');
@@ -156,25 +153,15 @@ class _ExamEditorState extends ConsumerState<_ExamEditor> {
     );
   }
 
-  Future<void> _pickDate({bool end = false}) async {
+  Future<void> _pickDate() async {
     final picked = await showDatePicker(
       context: context,
-      initialDate: end ? _endDate : _date,
-      firstDate: end ? _date : DateTime(2000),
+      initialDate: _date,
+      firstDate: DateTime(2000),
       lastDate: DateTime(2100, 12, 31),
     );
     if (picked != null && mounted) {
-      setState(() {
-        final date = calendarDate(picked);
-        if (end) {
-          _endDate = date;
-        } else {
-          final shiftedEnd = date.add(_endDate.difference(_date));
-          final last = DateTime.utc(2100, 12, 31);
-          _endDate = shiftedEnd.isAfter(last) ? last : shiftedEnd;
-          _date = date;
-        }
-      });
+      setState(() => _date = calendarDate(picked));
     }
   }
 
@@ -268,7 +255,7 @@ class _ExamEditorState extends ConsumerState<_ExamEditor> {
           key: const ValueKey('exam-date'),
           label: '考试日期',
           value: '${_date.year}年${shortDate(_date)}',
-          onTap: () => _pickDate(),
+          onTap: _pickDate,
         ),
         Row(
           children: [
@@ -285,20 +272,11 @@ class _ExamEditorState extends ConsumerState<_ExamEditor> {
               child: _ExamValueField(
                 key: const ValueKey('exam-end-time'),
                 label: '结束时间',
-                value: _date == _endDate
-                    ? clockLabel(_endMinute)
-                    : '${shortDate(_endDate)} ${clockLabel(_endMinute)}',
+                value: clockLabel(_endMinute),
                 onTap: () => _pickTime(start: false),
               ),
             ),
           ],
-        ),
-        Align(
-          alignment: Alignment.centerRight,
-          child: TextButton(
-            onPressed: () => _pickDate(end: true),
-            child: Text(_date == _endDate ? '设置跨日结束日期' : '更改结束日期'),
-          ),
         ),
         TextFormField(
           key: const ValueKey('exam-room'),
@@ -345,7 +323,8 @@ class _ExamEditorState extends ConsumerState<_ExamEditor> {
               ),
             ),
           ),
-        Text(courseCheck, style: Theme.of(context).textTheme.bodySmall),
+        if (courseCheck.message case final message?)
+          Text(message, style: Theme.of(context).textTheme.bodySmall),
         if (examCheck)
           Text(
             '本地考试暂时无法完整读取，可能遗漏考试之间的冲突。',

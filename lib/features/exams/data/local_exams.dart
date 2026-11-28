@@ -60,9 +60,11 @@ class LocalExamRepository implements ExamRepository {
         start.year < 2000 ||
         start.year > 2100 ||
         end.year < 2000 ||
-        end.year > 2100 ||
-        !exam.endsAt.isAfter(exam.at)) {
+        end.year > 2100) {
       throw const FormatException('请填写有效的考试科目、日期和起止时间');
+    }
+    if (examTimeValidation(exam.at, exam.endsAt) case final error?) {
+      throw FormatException(error);
     }
     await db
         .into(db.examRows)

@@ -52,6 +52,7 @@ import 'package:neuq_one/features/timetable/data/local_timetable.dart';
 import 'package:neuq_one/features/timetable/domain/timetable.dart';
 import 'package:neuq_one/features/timetable/presentation/timetable_date.dart';
 import 'package:neuq_one/features/timetable/presentation/timetable_page.dart';
+import 'package:neuq_one/features/timetable/presentation/timetable_settings_page.dart';
 import 'package:neuq_one/features/timetable/presentation/week_timetable.dart';
 
 import 'fixtures/classroom_week.dart';
@@ -360,6 +361,33 @@ void main() {
       );
     },
     auth: profileAuth,
+  );
+
+  _appTest(
+    'timetable settings open from both the profile and the timetable menu',
+    (tester) async {
+      await _tab(tester, '我的');
+      final profileEntry = find.text('课表设置');
+      await tester.ensureVisible(profileEntry);
+      await tester.pumpAndSettle();
+      await tester.tap(profileEntry);
+      await tester.pumpAndSettle();
+      expect(find.byType(TimetableSettingsPage), findsOneWidget);
+      await tester.tap(find.byType(BackButton));
+      await tester.pumpAndSettle();
+      expect(find.byType(TimetableSettingsPage), findsNothing);
+
+      await _tab(tester, '课表');
+      await tester.tap(find.byTooltip('课表选项'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('课表设置').last);
+      await tester.pumpAndSettle();
+      expect(find.byType(TimetableSettingsPage), findsOneWidget);
+      await tester.tap(find.byType(BackButton));
+      await tester.pumpAndSettle();
+      expect(find.byType(WeekTimetable), findsOneWidget);
+    },
+    initialTimetable: Timetable([sampleTerm], []),
   );
 
   for (final restoreSavedSession in [true, false]) {
@@ -835,6 +863,9 @@ void main() {
       final end = find.byKey(const ValueKey('exam-end-time'));
       expect(tester.getTopLeft(start).dy, tester.getTopLeft(end).dy);
       expect(tester.getTopRight(start).dx, lessThan(tester.getTopLeft(end).dx));
+      expect(find.text('设置跨日结束日期'), findsNothing);
+      expect(find.text('更改结束日期'), findsNothing);
+      expect(find.text('冲突检测依据本地课表缓存，教务课程安排请以学校为准。'), findsNothing);
 
       await tester.tap(find.text('自定义科目'));
       await tester.pumpAndSettle();
@@ -892,6 +923,47 @@ void main() {
     ),
   );
 
+  final conflictTerm = Semester(
+    id: 'local:conflict',
+    name: '冲突学期',
+    start: mondayOf(today),
+    weeks: 18,
+  );
+  _appTest(
+    'exam editor keeps conflict warnings without the normal-state hint',
+    (tester) async {
+      await _tab(tester, '学业');
+      await tester.tap(find.text('考试安排'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byTooltip('添加考试'));
+      await tester.pumpAndSettle();
+      expect(find.text('冲突检测依据本地课表缓存，教务课程安排请以学校为准。'), findsNothing);
+      expect(find.text('⚠ 存在时间冲突'), findsOneWidget);
+      expect(find.textContaining('冲突课程'), findsWidgets);
+      expect(find.widgetWithText(FilledButton, '仍然保存'), findsOneWidget);
+      await tester.tap(find.widgetWithText(TextButton, '取消'));
+      await tester.pumpAndSettle();
+      expect(find.text('添加考试'), findsNothing);
+    },
+    initialTimetable: Timetable(
+      [conflictTerm],
+      [
+        Course(
+          id: 'school:conflict-course',
+          semesterId: conflictTerm.id,
+          name: '冲突课程',
+          teacher: '测试教师',
+          room: '测试教室',
+          weekday: today.weekday,
+          startMinute: 530,
+          endMinute: 575,
+          weeks: const [1],
+          colorIndex: 0,
+        ),
+      ],
+    ),
+  );
+
   _appTest(
     'exam cards group by date under independent headings',
     (tester) async {
@@ -933,6 +1005,36 @@ void main() {
       _testExam('today-a', '今日考试甲', today),
       _testExam('today-b', '今日考试乙', today, start: 14),
       _testExam('tomorrow', '明日考试', today.add(const Duration(days: 1))),
+    ],
+  );
+
+  _appTest(
+    'exam editor blocks saving when the end time is not later than the start',
+    (tester) async {
+      await _tab(tester, '学业');
+      await tester.tap(find.text('考试安排'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('跨日旧考试'));
+      await tester.pumpAndSettle();
+      expect(find.text('编辑考试'), findsOneWidget);
+      expect(find.text('设置跨日结束日期'), findsNothing);
+      expect(find.text('更改结束日期'), findsNothing);
+      expect(find.byKey(const ValueKey('exam-date')), findsOneWidget);
+      await tester.tap(find.widgetWithText(FilledButton, '保存'));
+      await tester.pumpAndSettle();
+      expect(find.text('结束时间需晚于开始时间'), findsOneWidget);
+      expect(find.text('编辑考试'), findsOneWidget);
+      await tester.tap(find.widgetWithText(TextButton, '取消'));
+      await tester.pumpAndSettle();
+      expect(find.text('跨日旧考试'), findsOneWidget);
+    },
+    initialExams: [
+      Exam(
+        id: 'legacy-cross-day',
+        name: '跨日旧考试',
+        at: campusInstant(today, 23 * 60),
+        endsAt: campusInstant(today.add(const Duration(days: 1)), 30),
+      ),
     ],
   );
 
@@ -1968,6 +2070,10 @@ void main() {
       await tester.pumpAndSettle();
       expect(course, findsNWidgets(2));
       expect(exam, findsOneWidget);
+      expect(
+        find.byKey(ValueKey('timetable-exam-marker-$fusionDate')),
+        findsOneWidget,
+      );
       await tester.tap(exam);
       await tester.pumpAndSettle();
       expect(find.text('时间冲突'), findsOneWidget);
@@ -2016,6 +2122,10 @@ void main() {
       expect(tester.widget<WeekTimetable>(week).week, 2);
       expect(course, findsOneWidget);
       expect(exam, findsNothing);
+      expect(
+        find.byKey(ValueKey('timetable-exam-marker-$fusionDate')),
+        findsNothing,
+      );
     },
     initialTimetable: Timetable([fusionTerm], [fusionCourse]),
     initialExams: [fusionExam],

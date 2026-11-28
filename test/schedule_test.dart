@@ -226,7 +226,7 @@ void main() {
     expect(visibleCourseSpans(_monday, event, all), isEmpty);
   });
 
-  test('午休、课间、首节前、晚间、最后一节后、跨日与教学周外', () {
+  test('午休、课间、首节前、晚间、最后一节后与教学周外', () {
     for (final (start, end) in [
       (420, 470),
       (525, 530),
@@ -246,28 +246,45 @@ void main() {
     final grid = examGridSpan(_monday, evening.time);
     expect(grid.start, closeTo(8 + 10 / 45, .0001));
     expect(grid.end, closeTo(9 + 40 / 45, .0001));
-    final sunday = _monday.add(const Duration(days: 6));
-    final cross = _exam('跨日', 1380, 1470, date: sunday);
     final out = _exam(
       '教学周外',
       580,
       605,
       date: _monday.add(const Duration(days: 45)),
     );
-    final schedule = _schedule([], [cross, out]);
-    final nextDay = sunday.add(const Duration(days: 1));
-    expect(schedule.on(sunday).single.exam, same(cross));
-    expect(schedule.on(nextDay).single.exam, same(cross));
-    expect(
-      groupExamsOn(nextDay, schedule.exams).single.time.start,
-      campusInstant(nextDay, 0),
-    );
+    final schedule = _schedule([], [out]);
     expect(_term.weekFor(out.campusDate), isNull);
     expect(schedule.on(out.campusDate).single.exam, same(out));
-    expect(cross.campusTimeRange, '23:00–12月7日 00:30');
-    expect(cross.isFinishedAt(cross.campusEnd), isTrue);
+    expect(out.campusTimeRange, '09:40–10:05');
+    expect(out.isFinishedAt(out.campusEnd), isTrue);
     final fromOtherZone = DateTime.parse('2026-11-30T01:00:00-05:00');
     expect(campusMinuteAt(fromOtherZone), 14 * 60);
+  });
+
+  test('考试开始和结束必须同日且结束严格晚于开始', () {
+    expect(
+      examTimeValidation(
+        campusInstant(_monday, 540),
+        campusInstant(_monday, 600),
+      ),
+      isNull,
+    );
+    for (final end in [
+      campusInstant(_monday, 540),
+      campusInstant(_monday, 480),
+    ]) {
+      expect(
+        examTimeValidation(campusInstant(_monday, 540), end),
+        examTimeError,
+      );
+    }
+    expect(
+      examTimeValidation(
+        campusInstant(_monday, 1380),
+        campusInstant(_monday.add(const Duration(days: 1)), 60),
+      ),
+      examTimeError,
+    );
   });
 
   test('旧课表缓存首次分色，刷新和重开复用分配，失败保留课表', () async {

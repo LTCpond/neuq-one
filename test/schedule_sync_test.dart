@@ -108,7 +108,11 @@ void main() {
     }
 
     await _when(() => prefs.ledgers.length == 1);
-    expect(container.read(scheduleCourseCheckProvider), contains('暂时无法完整检测'));
+    expect(container.read(scheduleCourseCheckProvider).complete, isFalse);
+    expect(
+      container.read(scheduleCourseCheckProvider).message,
+      contains('暂时无法完整检测'),
+    );
     await refresh(false);
     await exams.save(examAt(540, 555));
     await _when(() => prefs.ledgers.single.exams.length == 1);
@@ -120,7 +124,8 @@ void main() {
     expect(notifications.sent, isEmpty);
     expect(prefs.ledgers.single.pending, hasLength(1));
     expect(container.read(scheduleConflictsProvider).pairs, hasLength(1));
-    expect(container.read(scheduleCourseCheckProvider), contains('本地课表缓存'));
+    expect(container.read(scheduleCourseCheckProvider).complete, isTrue);
+    expect(container.read(scheduleCourseCheckProvider).message, isNull);
     await expectLater(
       repository.refresh(SchoolDataSet.timetable, const _Source(null)),
       throwsFormatException,
@@ -188,6 +193,15 @@ void main() {
     expect(container.read(scheduleConflictsProvider).pairs, isEmpty);
     await exams.save(examAt(540, 555));
     await _when(() => prefs.ledgers.single.active.length == 1);
+    expect(notifications.sent, hasLength(2));
+    await container
+        .read(settingsProvider.notifier)
+        .setShowExamsInTimetable(false);
+    await _when(
+      () =>
+          container.read(settingsProvider).value?.showExamsInTimetable == false,
+    );
+    expect(container.read(scheduleConflictsProvider).pairs, hasLength(1));
     expect(notifications.sent, hasLength(2));
     await exams.delete('manual');
     await _when(() => prefs.ledgers.single.exams.isEmpty);

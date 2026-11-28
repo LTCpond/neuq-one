@@ -41,11 +41,12 @@ void main() {
       isTrue,
     );
     await first.read(settingsProvider.notifier).setExamConflictReminders(false);
+    await first.read(settingsProvider.notifier).setReminder(15);
     final reopened = ProviderContainer.test(overrides: overrides);
     final restored = await reopened.read(settingsProvider.future);
     expect(restored.showExamsInTimetable, isFalse);
     expect(restored.examConflictReminders, isFalse);
-    expect(restored.reminderMinutes, defaults.reminderMinutes);
+    expect(restored.reminderMinutes, 15);
   });
 
   test('classroom view preferences survive a new provider scope', () async {

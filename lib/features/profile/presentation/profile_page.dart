@@ -12,11 +12,10 @@ import '../../../core/widgets/campus_components.dart';
 import '../../../core/widgets/screen.dart';
 import '../../desktop_widgets/data/desktop_widget_bridge.dart';
 import '../../desktop_widgets/presentation/desktop_widgets_page.dart';
+import '../../timetable/presentation/timetable_settings_page.dart';
 import '../data/app_updates.dart';
-import '../data/course_reminders.dart';
 import 'cache_management_page.dart';
 import 'diagnostics_page.dart';
-import 'reminder_settings_page.dart';
 import 'update_prompt.dart';
 
 const _repositoryUrl = String.fromEnvironment(
@@ -101,7 +100,6 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
     final controller = ref.read(settingsProvider.notifier);
     final connection = ref.watch(schoolConnectionProvider);
     final remembered = ref.watch(rememberedSchoolPasswordProvider);
-    final reminders = ref.watch(reminderSyncProvider);
     final installedVersion = ref.watch(installedAppVersionProvider);
     final availableUpdate = ref.watch(availableAppUpdateProvider).value;
     final developmentBuild = ref.watch(androidDebugBuildProvider);
@@ -182,51 +180,12 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
                       ),
                       const SizedBox(height: 6),
                       _ProfileTile(
-                        icon: const Icon(Icons.notifications_none_outlined),
-                        title: '课程提醒',
-                        subtitle: reminderStatusLabel(reminders),
-                        accent: dark
-                            ? (const Color(0xFF563D25), const Color(0xFFFFD1A4))
-                            : (
-                                const Color(0xFFFFE8CF),
-                                const Color(0xFFA45717),
-                              ),
+                        icon: const Icon(Icons.calendar_month_outlined),
+                        title: '课表设置',
+                        subtitle: '课程提醒、考试显示与冲突提醒',
+                        accent: (colors.primaryContainer, colors.primary),
                         onTap: () =>
-                            _openSettings(const ReminderSettingsPage()),
-                      ),
-                      const SizedBox(height: 6),
-                      Card(
-                        child: Column(
-                          children: [
-                            SwitchListTile(
-                              title: const Text('在课表中显示考试'),
-                              subtitle: const Text('在对应日期展示手动添加的考试安排。'),
-                              value: value.showExamsInTimetable,
-                              onChanged: _busy
-                                  ? null
-                                  : (enabled) => _run(() async {
-                                      await controller.setShowExamsInTimetable(
-                                        enabled,
-                                      );
-                                      return null;
-                                    }),
-                            ),
-                            const Divider(height: 1),
-                            SwitchListTile(
-                              title: const Text('考试冲突提醒'),
-                              subtitle: const Text('发现新的考试时间冲突时发送通知。'),
-                              value: value.examConflictReminders,
-                              onChanged: _busy
-                                  ? null
-                                  : (enabled) => _run(() async {
-                                      await controller.setExamConflictReminders(
-                                        enabled,
-                                      );
-                                      return null;
-                                    }),
-                            ),
-                          ],
-                        ),
+                            _openSettings(const TimetableSettingsPage()),
                       ),
                       if (supportsDesktopWidgets) ...[
                         const SizedBox(height: 6),

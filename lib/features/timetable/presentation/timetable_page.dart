@@ -20,6 +20,7 @@ import 'timetable_date.dart';
 import 'timetable_editors.dart';
 import 'course_details.dart';
 import 'schedule_details.dart';
+import 'timetable_settings_page.dart';
 import 'week_timetable.dart';
 
 class TimetablePage extends ConsumerStatefulWidget {
@@ -166,6 +167,12 @@ class _TimetablePageState extends ConsumerState<TimetablePage> {
                     }
                   case 'refresh':
                     ref.invalidate(refreshKey);
+                  case 'settings':
+                    Navigator.of(context, rootNavigator: true).push<void>(
+                      MaterialPageRoute(
+                        builder: (_) => const TimetableSettingsPage(),
+                      ),
+                    );
                   case 'date':
                     _pickDate(today, showExams);
                 }
@@ -186,6 +193,17 @@ class _TimetablePageState extends ConsumerState<TimetablePage> {
                     value: 'export',
                     child: Text('导出 ICS 日历'),
                   ),
+                const PopupMenuDivider(),
+                const PopupMenuItem(
+                  value: 'settings',
+                  child: Row(
+                    children: [
+                      Icon(Icons.settings_outlined, size: 20),
+                      SizedBox(width: 10),
+                      Text('课表设置'),
+                    ],
+                  ),
+                ),
                 const PopupMenuItem(value: 'date', child: Text('按日期查看日程')),
               ],
               child: Ink(
@@ -290,18 +308,12 @@ class _TimetablePageState extends ConsumerState<TimetablePage> {
   Widget _outsideTermExams(ScheduleEvents schedule, List<Semester> terms) {
     final entries = [
       for (final event in schedule.exams)
-        for (final date in {
-          event.date,
-          campusDateAt(
-            event.time.end.subtract(const Duration(microseconds: 1)),
-          ),
-        })
-          if (!terms.any((term) {
-            final week = term.weekFor(date);
-            // The seven-column grid also displays exams earlier in week one.
-            return week != null || mondayOf(date) == mondayOf(term.start);
-          }))
-            (event: event, date: date),
+        if (!terms.any((term) {
+          final week = term.weekFor(event.date);
+          // The seven-column grid also displays exams earlier in week one.
+          return week != null || mondayOf(event.date) == mondayOf(term.start);
+        }))
+          (event: event, date: event.date),
     ];
     if (entries.isEmpty) return const SizedBox.shrink();
     return Column(
