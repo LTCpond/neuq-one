@@ -25,10 +25,16 @@ enum AcademicSection {
 /// Sections load lazily, stay alive after their first visit and own their own
 /// data, filters and scroll position.
 class AcademicPage extends ConsumerStatefulWidget {
-  const AcademicPage({super.key, this.examRequest, this.addExam = false});
+  const AcademicPage({
+    super.key,
+    this.examRequest,
+    this.addExam = false,
+    this.examTarget,
+  });
 
   final String? examRequest;
   final bool addExam;
+  final ExamOpenRequest? examTarget;
 
   @override
   ConsumerState<AcademicPage> createState() => _AcademicPageState();
@@ -135,7 +141,9 @@ class _AcademicPageState extends ConsumerState<AcademicPage> {
                       AcademicSection.grades => const GradesSection(),
                       AcademicSection.planCompletion =>
                         const PlanCompletionSection(),
-                      AcademicSection.exams => const ExamSection(),
+                      AcademicSection.exams => ExamSection(
+                        target: widget.examTarget,
+                      ),
                     }
                   else
                     const SizedBox.shrink(),

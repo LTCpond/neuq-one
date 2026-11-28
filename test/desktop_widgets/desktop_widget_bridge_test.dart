@@ -7,6 +7,7 @@ import 'package:neuq_one/features/desktop_widgets/data/desktop_widget_bridge.dar
 import 'package:neuq_one/features/desktop_widgets/presentation/desktop_widgets_page.dart';
 import 'package:neuq_one/features/exams/domain/exam.dart';
 import 'package:neuq_one/features/timetable/domain/course_period_span.dart';
+import 'package:neuq_one/features/timetable/domain/schedule.dart';
 import 'package:neuq_one/features/timetable/domain/timetable.dart';
 import 'package:neuq_one/features/timetable/presentation/timetable_palette.dart';
 
@@ -76,6 +77,54 @@ void main() {
     expect(exam['end'], DateTime.utc(2026, 12, 3, 3).millisecondsSinceEpoch);
   });
 
+  test('快照传递考试冲突、覆盖后的课程块和补充时段入口', () {
+    final date = semester.dateFor(2, DateTime.sunday);
+    final table = Timetable([semester], [course()]);
+    final exams = [
+      Exam(
+        id: 'lunch',
+        name: '午休考试',
+        at: campusInstant(date, 725),
+        endsAt: campusInstant(date, 790),
+      ),
+      Exam(
+        id: 'overlap',
+        name: '冲突考试',
+        at: campusInstant(date, 860),
+        endsAt: campusInstant(date, 925),
+      ),
+    ];
+    final schedule = ScheduleEvents(CourseSchedule(table), exams);
+    final conflicts = ScheduleConflicts(schedule);
+    final term =
+        (widgetTimetableData(
+                      table,
+                      ready: true,
+                      schedule: schedule,
+                      conflicts: conflicts,
+                    )['terms']
+                    as List)
+                .single
+            as Map;
+    final entries = term['examDays'] as Map;
+    final day = entries.values.single as Map;
+    expect(day['supplement'], isTrue);
+    final items = (day['items'] as List).cast<Map>();
+    expect(items.where((entry) => entry['id'] == 'course'), hasLength(2));
+    final exam = items.singleWhere((entry) => entry['id'] == 'overlap');
+    expect(exam['examCount'], 1);
+    expect(exam['conflicts'], 1);
+    expect(exam['gridFrom'], closeTo(4 + 20 / 45, .0001));
+    expect(exam['gridTo'], closeTo(5 + 35 / 45, .0001));
+    final roster = widgetExamData(
+      exams,
+      showOnTimetable: false,
+      conflicts: conflicts,
+    );
+    expect(roster['showOnTimetable'], isFalse);
+    expect((roster['items'] as List).cast<Map>().last['conflicts'], 1);
+  });
+
   test('组件导航仅接受已知目标且编码课程 ID', () {
     expect(
       desktopWidgetLocation({'target': 'exams'}, 2)?.toString(),
@@ -89,6 +138,17 @@ void main() {
     expect(course?.queryParameters, {'course': 'id&x=1', 'widget': '1'});
     expect(desktopWidgetLocation({'target': 'course'}, 1), isNull);
     expect(desktopWidgetLocation({'target': '/profile'}, 1), isNull);
+    expect(
+      desktopWidgetLocation({
+        'target': 'exam',
+        'exam': 'e',
+      }, 3)?.queryParameters,
+      containsPair('exam', 'e'),
+    );
+    expect(
+      desktopWidgetLocation({'target': 'day', 'date': '2026-11-30'}, 4)?.path,
+      '/timetable',
+    );
   });
 
   testWidgets('桌面小组件页仅请求七种尺寸的预览', (tester) async {

@@ -53,8 +53,8 @@ internal class WidgetRenderer(private val context: Context) {
             open(R.id.widget_header, id, link, WidgetNavigation.TIMETABLE)
             if (courses.isEmpty() || data.todayCoursesEnded) {
                 when {
-                    data.term == null -> todayStatus("暂无课表", "点击打开课表", 0)
-                    data.todayCoursesEnded -> todayStatus("今日课程已结束", "今天辛苦了", R.drawable.widget_day_done)
+                    data.todayCoursesEnded -> todayStatus("今日日程已结束", "今天辛苦了", R.drawable.widget_day_done)
+                    !data.timetableReady -> todayStatus("暂无课表", "点击打开课表", 0)
                     else -> todayStatus("今日无课", "好好享受今天", R.drawable.widget_day_free)
                 }
                 open(R.id.widget_empty, id, link, WidgetNavigation.TIMETABLE)
@@ -80,13 +80,23 @@ internal class WidgetRenderer(private val context: Context) {
         views(if (wide) R.layout.widget_course_wide else R.layout.widget_course_small).apply {
             setInt(R.id.widget_row_height, "setHeight", look.dp(height))
             text(R.id.widget_course_name, course.getString("name"))
+            val exam = course.optInt("examCount") > 0
+            val conflict = course.optInt("conflicts") > 0
+            setViewVisibility(R.id.widget_course_badge, if (exam) View.VISIBLE else View.GONE)
+            if (exam) text(R.id.widget_course_badge, if (conflict) "⚠ 考试" else "考试")
             text(R.id.widget_course_room, course.getString("room").ifBlank { "地点待定" })
             text(R.id.widget_course_time, "${clock(course.getInt("from"))}–${clock(course.getInt("to"))}")
             val colors = course.getJSONArray("colors")
-            themedColor(R.id.widget_course_stripe, "setColorFilter", colors.getLong(0).toInt(), colors.getLong(2).toInt())
+            val color = if (exam) 1 else 0
+            themedColor(R.id.widget_course_stripe, "setColorFilter", colors.getLong(color).toInt(), colors.getLong(color + 2).toInt())
+            if (exam) themedColor(R.id.widget_course_badge, "setTextColor", colors.getLong(1).toInt(), colors.getLong(3).toInt())
             val courseId = course.getString("id")
-            if (direct) open(R.id.widget_row_click, id, link, WidgetNavigation.COURSE, courseId)
-            else setOnClickFillInIntent(R.id.widget_row_click, Intent().putExtra(WidgetNavigation.COURSE_ID, courseId))
+            if (direct) {
+                open(R.id.widget_row_click, id, link, if (exam) WidgetNavigation.EXAM else WidgetNavigation.COURSE, courseId)
+            } else {
+                val key = if (exam) WidgetNavigation.EXAM_ID else WidgetNavigation.COURSE_ID
+                setOnClickFillInIntent(R.id.widget_row_click, Intent().putExtra(key, courseId))
+            }
         }
 
     private fun exams(id: Int, size: WidgetSize, data: WidgetData, link: String?, preview: Boolean): RemoteViews {
@@ -99,7 +109,9 @@ internal class WidgetRenderer(private val context: Context) {
                 open(R.id.widget_root, id, link, WidgetNavigation.ADD_EXAM)
             }
             val layout = if (WidgetSizePolicy.tall(size)) R.layout.widget_exam_square else R.layout.widget_exam_small
-            return examRow(first, data, layout).apply { open(R.id.widget_root, id, link, WidgetNavigation.EXAMS) }
+            return examRow(first, data, layout).apply {
+                open(R.id.widget_root, id, link, WidgetNavigation.EXAM, first.getString("id"))
+            }
         }
         return views(R.layout.widget_exams_list).apply {
             listInsets()
@@ -112,7 +124,7 @@ internal class WidgetRenderer(private val context: Context) {
                 collection(WidgetKind.EXAMS, id, size, geometry, data.exams.size, link, preview) { index ->
                     examRow(data.exams[index], data, R.layout.widget_exam_wide, geometry.rowHeight).apply {
                         if (preview || data.exams.size <= geometry.rows) {
-                            open(R.id.widget_row_click, id, link, WidgetNavigation.EXAMS)
+                            open(R.id.widget_row_click, id, link, WidgetNavigation.EXAM, data.exams[index].getString("id"))
                         }
                     }
                 }
@@ -124,7 +136,7 @@ internal class WidgetRenderer(private val context: Context) {
         if (height > 0) {
             setInt(R.id.widget_row_height, "setHeight", look.dp(height))
         }
-        if (fillIn) setOnClickFillInIntent(R.id.widget_row_click, Intent())
+        if (fillIn) setOnClickFillInIntent(R.id.widget_row_click, Intent().putExtra(WidgetNavigation.EXAM_ID, exam.getString("id")))
         val status = data.examStatus(exam)
         text(R.id.widget_count, status.label)
         text(R.id.widget_unit, status.unit)
@@ -150,9 +162,11 @@ internal class WidgetRenderer(private val context: Context) {
             val prefix = if (layout == R.layout.widget_exam_small) "" else "$date "
             "$prefix$startTime–$endDay${end.format(time)}"
         }
-        text(R.id.widget_exam_name, exam.getString("name"))
+        val conflict = exam.optInt("conflicts") > 0
+        text(R.id.widget_exam_name, if (conflict) "⚠ ${exam.getString("name")}" else exam.getString("name"))
         text(R.id.widget_exam_time, whenLabel)
-        text(R.id.widget_exam_room, exam.getString("room").ifBlank { "地点待定" })
+        val room = exam.getString("room").ifBlank { "地点待定" }
+        text(R.id.widget_exam_room, if (conflict) "时间冲突 · $room" else room)
     }
 
     private fun RemoteViews.collection(
@@ -180,8 +194,8 @@ internal class WidgetRenderer(private val context: Context) {
                     .appendPath(link ?: "none").build())
             @Suppress("DEPRECATION")
             setRemoteAdapter(R.id.widget_list, adapter)
-            val target = if (kind == WidgetKind.TODAY) WidgetNavigation.COURSE else WidgetNavigation.EXAMS
-            setPendingIntentTemplate(R.id.widget_list, WidgetNavigation.open(context, id, link, target, collection = true))
+            setPendingIntentTemplate(R.id.widget_list, WidgetNavigation.open(context, id, link,
+                WidgetNavigation.SCHEDULE_ITEM, collection = true))
         }
     }
 
@@ -200,9 +214,11 @@ internal class WidgetRenderer(private val context: Context) {
                 setViewVisibility(R.id.widget_previous, View.GONE)
                 setViewVisibility(R.id.widget_next, View.GONE)
                 text(R.id.widget_week_range, "")
-                empty(if (!fits) "请拉高周课表" else "暂无课表", if (!fits) "周课表需要至少 4×5 的空间" else "点击打开课表")
+                val examsAvailable = data.showExams && data.exams.isNotEmpty()
+                empty(if (!fits) "请拉高周课表" else "暂无课表",
+                    if (!fits) "周课表需要至少 4×5 的空间" else if (examsAvailable) "点击查看考试安排" else "点击打开课表")
                 open(R.id.widget_week_reset, id, link, WidgetNavigation.TIMETABLE)
-                open(R.id.widget_empty, id, link, WidgetNavigation.TIMETABLE)
+                open(R.id.widget_empty, id, link, if (fits && examsAvailable) WidgetNavigation.EXAMS else WidgetNavigation.TIMETABLE)
                 return@apply
             }
 
@@ -237,13 +253,16 @@ internal class WidgetRenderer(private val context: Context) {
             for (day in 1..7) {
                 val date = monday.plusDays(day - 1L)
                 val today = date == data.today
-                addView(R.id.widget_days, weekDay(date, today))
-                addView(R.id.widget_week_grid, weekColumn(data.courses(week, day), height, columnWidth, today, id, link))
+                val examDay = data.weekExamDay(date)
+                val items = examDay?.getJSONArray("items")?.objects() ?: data.courses(week, day)
+                addView(R.id.widget_days, weekDay(date, today, examDay?.optBoolean("supplement") == true, id, link))
+                addView(R.id.widget_week_grid, weekColumn(items, height, columnWidth, today, id, link, data, date))
             }
         }
 
-    private fun weekDay(date: LocalDate, today: Boolean) = views(R.layout.widget_week_day).apply {
-        text(R.id.widget_day_name, weekday(date.dayOfWeek.value))
+    private fun weekDay(date: LocalDate, today: Boolean, supplement: Boolean, id: Int, link: String?) =
+        views(R.layout.widget_week_day).apply {
+        text(R.id.widget_day_name, if (supplement) "${weekday(date.dayOfWeek.value)}·" else weekday(date.dayOfWeek.value))
         text(R.id.widget_day_number, date.dayOfMonth.toString())
         if (today) {
             highlight()
@@ -251,10 +270,15 @@ internal class WidgetRenderer(private val context: Context) {
             setInt(R.id.widget_day_number, "setBackgroundResource", R.drawable.widget_date_badge)
             colorResource(R.id.widget_day_number, "setTextColor", R.color.widget_on_brand)
         }
-        setContentDescription(R.id.widget_column, "${date.format(chineseDate)} ${weekday(date.dayOfWeek.value)}${if (today) "，今天" else ""}")
+        setContentDescription(R.id.widget_column, "${date.format(chineseDate)} ${weekday(date.dayOfWeek.value)}" +
+            (if (today) "，今天" else "") + (if (supplement) "，有补充考试时段" else "") + "，点击查看日程")
+        open(R.id.widget_column, id, link, WidgetNavigation.DAY, date.toString())
     }
 
-    private fun weekColumn(courses: List<JSONObject>, height: Int, width: Int, today: Boolean, id: Int, link: String?) =
+    private fun weekColumn(
+        courses: List<JSONObject>, height: Int, width: Int, today: Boolean, id: Int, link: String?,
+        data: WidgetData, date: LocalDate
+    ) =
         views(R.layout.widget_week_column).apply {
             if (today) highlight()
             repeat(12) { addView(R.id.widget_periods, views(R.layout.widget_week_cell)) }
@@ -262,34 +286,47 @@ internal class WidgetRenderer(private val context: Context) {
                 val course = block.course
                 val left = width * block.lane / block.lanes + 1
                 val right = width - width * (block.lane + 1) / block.lanes + 1
-                val top = height * course.getInt("first") / 12 + 1
-                val bottom = height - height * course.getInt("last") / 12 + 1
+                val top = (height * course.gridStart() / 12).roundToInt() + 1
+                val bottom = height - (height * course.gridEnd() / 12).roundToInt() + 1
+                val examCount = course.optInt("examCount")
+                val conflict = course.optInt("conflicts") > 0 || examCount > 1
+                val palette = if (examCount > 0) {
+                    data.examColors(data.now.toEpochMilli() >= course.getLong("examEnd")) ?: continue
+                } else course.getJSONArray("colors")
                 addView(R.id.widget_courses, views(R.layout.widget_week_course).apply {
                     setViewPadding(R.id.widget_course_position, look.dp(left), look.dp(top), look.dp(right), look.dp(bottom))
-                    val palette = course.getJSONArray("colors")
                     themedColor(R.id.widget_course_background, "setColorFilter", palette.getLong(0).toInt(), palette.getLong(2).toInt())
                     for (view in listOf(R.id.widget_course_name, R.id.widget_course_room)) {
                         themedColor(view, "setTextColor", palette.getLong(1).toInt(), palette.getLong(3).toInt())
                     }
-                    val name = course.getString("name")
+                    val subject = course.getString("name")
+                    val name = when {
+                        examCount > 1 -> "⚠ ${examCount}场考试 $subject"
+                        conflict -> "⚠ 考试 $subject"
+                        examCount == 1 -> "考试 $subject"
+                        else -> subject
+                    }
                     val room = course.getString("room")
                     val contentWidth = look.dp(width) - look.dp(left) - look.dp(right) - 2 * look.dp(1)
                     val contentHeight = look.dp(height) - look.dp(top) - look.dp(bottom) - look.dp(3)
                     val subjectText = measureBlockText(name, 10f, true, contentWidth)
                     val roomText = room.takeIf { it.isNotBlank() }?.let { measureBlockText(it, 9f, false, contentWidth) }
                     val reservedRoomHeight = roomText?.getLineBottom(0) ?: 0
-                    val nameLines = fullLines(subjectText, contentHeight - reservedRoomHeight).coerceAtLeast(1)
+                    val nameLines = fullLines(subjectText, contentHeight - reservedRoomHeight)
+                        .takeIf { it > 0 } ?: fullLines(subjectText, contentHeight)
                     val roomLines = roomText?.let {
-                        fullLines(it, contentHeight - subjectText.getLineBottom(nameLines - 1))
+                        fullLines(it, contentHeight - if (nameLines > 0) subjectText.getLineBottom(nameLines - 1) else 0)
                     } ?: 0
-                    setInt(R.id.widget_course_name, "setMaxLines", nameLines)
+                    if (nameLines > 0) setInt(R.id.widget_course_name, "setMaxLines", nameLines)
+                    else setViewVisibility(R.id.widget_course_name, View.GONE)
                     if (roomLines > 0) setInt(R.id.widget_course_room, "setMaxLines", roomLines)
                     else setViewVisibility(R.id.widget_course_room, View.GONE)
                     text(R.id.widget_course_name, name)
                     text(R.id.widget_course_room, room)
                     setContentDescription(R.id.widget_week_course_click, listOf(name, room,
                         "${clock(course.getInt("from"))}–${clock(course.getInt("to"))}").filter { it.isNotBlank() }.joinToString("，"))
-                    open(R.id.widget_week_course_click, id, link, WidgetNavigation.COURSE, course.getString("id"))
+                    if (examCount > 0) open(R.id.widget_week_course_click, id, link, WidgetNavigation.DAY, date.toString())
+                    else open(R.id.widget_week_course_click, id, link, WidgetNavigation.COURSE, course.getString("id"))
                 })
             }
         }
@@ -358,20 +395,23 @@ internal class WidgetRenderer(private val context: Context) {
 
 internal data class CourseBlock(val course: JSONObject, val lane: Int, val lanes: Int)
 
+private fun JSONObject.gridStart() = optDouble("gridFrom", optInt("first").toDouble())
+private fun JSONObject.gridEnd() = optDouble("gridTo", optInt("last").toDouble())
+
 internal fun placeBlocks(courses: List<JSONObject>): List<CourseBlock> {
     val result = mutableListOf<CourseBlock>()
     val group = mutableListOf<Pair<JSONObject, Int>>()
-    val ends = mutableListOf<Int>()
+    val ends = mutableListOf<Double>()
     fun flush() {
         group.forEach { (course, lane) -> result.add(CourseBlock(course, lane, ends.size)) }
         group.clear()
         ends.clear()
     }
-    for (course in courses.sortedBy { it.getInt("first") }) {
-        val first = course.getInt("first")
+    for (course in courses.sortedBy { it.gridStart() }) {
+        val first = course.gridStart()
         if (ends.all { it <= first }) flush()
         val lane = ends.indexOfFirst { it <= first }.let { if (it < 0) ends.size else it }
-        val end = course.getInt("last")
+        val end = course.gridEnd()
         if (lane == ends.size) ends.add(end) else ends[lane] = end
         group.add(course to lane)
     }

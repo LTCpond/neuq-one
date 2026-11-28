@@ -12,12 +12,16 @@ class AppSettings {
     this.reminderMinutes = 0,
     this.allowInexactReminders = false,
     this.admissionYear = 2025,
+    this.showExamsInTimetable = true,
+    this.examConflictReminders = true,
   });
 
   final ThemeMode theme;
   final int reminderMinutes;
   final bool allowInexactReminders;
   final int admissionYear;
+  final bool showExamsInTimetable;
+  final bool examConflictReminders;
 }
 
 final settingsProvider = AsyncNotifierProvider<SettingsController, AppSettings>(
@@ -40,6 +44,9 @@ class SettingsController extends AsyncNotifier<AppSettings> {
       allowInexactReminders:
           await prefs.getBool('allowInexactReminders') ?? false,
       admissionYear: await prefs.getInt('admissionYear') ?? 2025,
+      showExamsInTimetable: await prefs.getBool('showExamsInTimetable') ?? true,
+      examConflictReminders:
+          await prefs.getBool('examConflictReminders') ?? true,
     );
   }
 
@@ -49,6 +56,10 @@ class SettingsController extends AsyncNotifier<AppSettings> {
       _update(() => _prefs.setInt('reminderMinutes', value));
   Future<void> setInexactReminders(bool value) =>
       _update(() => _prefs.setBool('allowInexactReminders', value));
+  Future<void> setShowExamsInTimetable(bool value) =>
+      _update(() => _prefs.setBool('showExamsInTimetable', value));
+  Future<void> setExamConflictReminders(bool value) =>
+      _update(() => _prefs.setBool('examConflictReminders', value));
   Future<void> _update(Future<void> Function() write) async {
     await write();
     ref.invalidateSelf();

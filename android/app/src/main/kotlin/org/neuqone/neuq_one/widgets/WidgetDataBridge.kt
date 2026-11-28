@@ -53,6 +53,13 @@ class WidgetDataBridge(private val activity: Activity, messenger: BinaryMessenge
                     if (changed) WidgetUpdateManager.refresh(context)
                     changed
                 }
+                "publishBatch" -> perform(result, cancellable = true) {
+                    val lease = requireNotNull(call.argument<String>("lease"))
+                    val sections = requireNotNull(call.argument<Map<String, String>>("sections"))
+                    val changed = WidgetUpdateManager.store(context).updateAll(lease, sections)
+                    if (changed) WidgetUpdateManager.refresh(context)
+                    changed
+                }
                 "takeNavigation" -> perform(result, cancellable = true) {
                     val store = WidgetUpdateManager.store(context)
                     if (store.snapshot() == null) null

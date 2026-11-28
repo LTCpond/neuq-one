@@ -31,11 +31,13 @@ class RecordEditor extends StatefulWidget {
     required this.title,
     required this.onSave,
     required this.children,
+    this.saveLabel = '保存',
   });
 
   final String title;
   final Future<void> Function() onSave;
   final List<Widget> children;
+  final String saveLabel;
 
   @override
   State<RecordEditor> createState() => _RecordEditorState();
@@ -105,7 +107,7 @@ class _RecordEditorState extends State<RecordEditor> {
         ),
         FilledButton(
           onPressed: _saving ? null : _save,
-          child: Text(_saving ? '保存中…' : '保存'),
+          child: Text(_saving ? '保存中…' : widget.saveLabel),
         ),
       ],
     ),

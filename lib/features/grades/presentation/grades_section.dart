@@ -73,7 +73,7 @@ class GradesSection extends ConsumerWidget {
         const SizedBox(height: 10),
         DataPanel(
           value: terms,
-          retry: () => ref.invalidate(timetableProvider),
+          retry: () => ref.invalidate(timetableStreamProvider),
           builder: (_) => semesters.isEmpty
               ? StatePanel(
                   '先创建一个学期',

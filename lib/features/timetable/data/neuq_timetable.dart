@@ -5,6 +5,7 @@ import 'package:uuid/uuid.dart';
 
 import '../../../core/time/campus_clock.dart';
 import '../../../core/time/neuq_periods.dart';
+import '../domain/course_colors.dart';
 import '../domain/timetable.dart';
 
 typedef NeuqTimetableEntry = ({String student, String calendarTag});
@@ -259,10 +260,7 @@ List<Course> readNeuqCourses(String source, Semester term) {
         startMinute: neuqPeriods[first].start,
         endMinute: neuqPeriods[last].end,
         weeks: weeks,
-        colorIndex: details.name.runes.fold(
-          0,
-          (sum, rune) => (sum * 31 + rune) % 12,
-        ),
+        colorIndex: courseColorSeed(details.name),
       );
     }
   }

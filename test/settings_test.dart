@@ -28,6 +28,26 @@ void main() {
     },
   );
 
+  test('考试显示和冲突提醒默认开启，可独立保存到设备', () async {
+    final preferences = _ExistingPreferences();
+    final overrides = [preferencesProvider.overrideWithValue(preferences)];
+    final first = ProviderContainer.test(overrides: overrides);
+    final defaults = await first.read(settingsProvider.future);
+    expect(defaults.showExamsInTimetable, isTrue);
+    expect(defaults.examConflictReminders, isTrue);
+    await first.read(settingsProvider.notifier).setShowExamsInTimetable(false);
+    expect(
+      (await first.read(settingsProvider.future)).examConflictReminders,
+      isTrue,
+    );
+    await first.read(settingsProvider.notifier).setExamConflictReminders(false);
+    final reopened = ProviderContainer.test(overrides: overrides);
+    final restored = await reopened.read(settingsProvider.future);
+    expect(restored.showExamsInTimetable, isFalse);
+    expect(restored.examConflictReminders, isFalse);
+    expect(restored.reminderMinutes, defaults.reminderMinutes);
+  });
+
   test('classroom view preferences survive a new provider scope', () async {
     final preferences = _ExistingPreferences();
     final overrides = [preferencesProvider.overrideWithValue(preferences)];
@@ -101,6 +121,11 @@ class _ExistingPreferences implements SharedPreferencesAsync {
 
   @override
   Future<bool?> getBool(String key) async => values[key] as bool?;
+
+  @override
+  Future<void> setBool(String key, bool value) async {
+    values[key] = value;
+  }
 
   @override
   Future<int?> getInt(String key) async => values[key] as int?;

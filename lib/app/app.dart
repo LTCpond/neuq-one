@@ -11,8 +11,10 @@ import '../core/network/campus_access/webvpn_session_manager.dart';
 import '../core/storage/settings.dart';
 import '../core/theme/app_theme.dart';
 import '../features/desktop_widgets/data/desktop_widget_bridge.dart';
+import '../features/exams/data/exam_conflict_reminders.dart';
 import '../features/profile/data/course_reminders.dart';
 import '../features/profile/data/app_updates.dart';
+import '../features/timetable/data/schedule_providers.dart';
 import 'router.dart';
 
 class NeuqOneApp extends ConsumerStatefulWidget {
@@ -29,6 +31,7 @@ class _NeuqOneAppState extends ConsumerState<NeuqOneApp> {
   DateTime? _backgroundedAt;
   late final AppLifecycleListener _lifecycle;
   late final WebVpnSessionManager _webVpn;
+  late final CourseReminderService _notifications;
   int _widgetRequest = 0;
 
   @override
@@ -37,6 +40,19 @@ class _NeuqOneAppState extends ConsumerState<NeuqOneApp> {
     if (supportsDesktopWidgets) {
       desktopWidgetChannel.setMethodCallHandler(_onWidgetMessage);
     }
+    _notifications = ref.read(reminderServiceProvider);
+    _notifications.onExamConflictTap = () => _openExamNotification().ignore();
+    ref.listenManual(
+      schoolSessionProvider.select((state) => state.asData?.value?.subject),
+      (_, subject) {
+        if (subject != null) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted) _openExamNotification().ignore();
+          });
+        }
+      },
+      fireImmediately: true,
+    );
     _webVpn = ref.read(webVpnSessionManagerProvider);
     final state = WidgetsBinding.instance.lifecycleState;
     _setCampusForeground(state == null || state == AppLifecycleState.resumed);
@@ -45,6 +61,9 @@ class _NeuqOneAppState extends ConsumerState<NeuqOneApp> {
       onPause: _recordBackgroundTime,
       onResume: () {
         _setCampusForeground(true);
+        ref.invalidate(scheduleClockProvider);
+        ref.invalidate(examConflictWakeProvider);
+        _openExamNotification().ignore();
         final session = ref.read(schoolSessionProvider).asData?.value;
         final backgroundedAt = _backgroundedAt;
         _backgroundedAt = null;
@@ -56,6 +75,28 @@ class _NeuqOneAppState extends ConsumerState<NeuqOneApp> {
         _startUpdateCheck();
       },
     );
+  }
+
+  Future<void> _openExamNotification() async {
+    final subject = ref.read(schoolSessionProvider).asData?.value?.subject;
+    if (subject == null) return;
+    try {
+      final payload = await _notifications.takeExamConflictTap();
+      if (!mounted ||
+          payload == null ||
+          ref.read(schoolSessionProvider).asData?.value?.subject != subject ||
+          ref.read(schoolNetworkBoundaryProvider).signingOut) {
+        return;
+      }
+      final location = examConflictNotificationLocation(
+        payload,
+        subject,
+        ++_widgetRequest,
+      );
+      if (location != null) ref.read(routerProvider).go(location.toString());
+    } on Object {
+      // Existing in-app routes remain available when the plugin is unavailable.
+    }
   }
 
   Future<void> _onWidgetMessage(MethodCall call) async {
@@ -156,6 +197,7 @@ class _NeuqOneAppState extends ConsumerState<NeuqOneApp> {
   @override
   void dispose() {
     if (supportsDesktopWidgets) desktopWidgetChannel.setMethodCallHandler(null);
+    _notifications.onExamConflictTap = null;
     _lifecycle.dispose();
     super.dispose();
   }
@@ -163,6 +205,7 @@ class _NeuqOneAppState extends ConsumerState<NeuqOneApp> {
   @override
   Widget build(BuildContext context) {
     ref.watch(desktopWidgetSyncProvider);
+    ref.watch(examConflictReminderSyncProvider);
     if (_restoringSession) {
       _restoringSession = ref.watch(
         schoolSessionProvider.select((session) => session.isLoading),

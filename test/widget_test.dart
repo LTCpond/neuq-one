@@ -1926,6 +1926,138 @@ void main() {
     campusCardRepository: cardRepository,
   );
 
+  final fusionDate = DateTime.utc(2026, 12, 7);
+  final fusionTerm = Semester(
+    id: 'school:fusion-test',
+    name: '融合测试学期',
+    start: fusionDate.subtract(const Duration(days: 7)),
+    weeks: 3,
+  );
+  final fusionCourse = Course(
+    id: 'school:fusion-course',
+    semesterId: fusionTerm.id,
+    name: '融合课程',
+    teacher: '任课教师',
+    room: '融合教室',
+    weekday: DateTime.monday,
+    startMinute: 480,
+    endMinute: 575,
+    weeks: const [2],
+    colorIndex: 7,
+  );
+  final fusionExam = Exam(
+    id: 'fusion-exam',
+    name: '融合考试',
+    at: campusInstant(fusionDate, 500),
+    endsAt: campusInstant(fusionDate, 550),
+    room: '融合考场',
+  );
+  _appTest(
+    '课表考试融合保留原课程信息、响应考试删除和显示开关，保持所选教学周',
+    (tester) async {
+      final week = find.byType(WeekTimetable);
+      final course = find.byKey(
+        const ValueKey('timetable-course-school:fusion-course'),
+      );
+      final exam = find.byKey(
+        ValueKey('timetable-exam-fusion-exam-$fusionDate'),
+      );
+      await tester.tap(find.byTooltip('选择教学周'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('第 2 周').last);
+      await tester.pumpAndSettle();
+      expect(course, findsNWidgets(2));
+      expect(exam, findsOneWidget);
+      await tester.tap(exam);
+      await tester.pumpAndSettle();
+      expect(find.text('时间冲突'), findsOneWidget);
+      expect(find.textContaining('08:00–09:35'), findsOneWidget);
+      expect(find.textContaining('任课教师'), findsOneWidget);
+      expect(find.textContaining('融合考场\n查看考试详情'), findsOneWidget);
+      Navigator.of(tester.element(find.text('时间冲突'))).pop();
+      await tester.pumpAndSettle();
+
+      final scope = ProviderScope.containerOf(tester.element(week));
+      final exams = scope.read(examRepositoryProvider);
+      await exams.delete(fusionExam.id);
+      await tester.pumpAndSettle();
+      expect(tester.widget<WeekTimetable>(week).week, 2);
+      expect(course, findsOneWidget);
+      expect(exam, findsNothing);
+
+      await exams.save(fusionExam);
+      await tester.pumpAndSettle();
+      await _tab(tester, '学业');
+      await tester.tap(find.text('考试安排'));
+      await tester.pumpAndSettle();
+      expect(find.text('时间冲突 · 融合课程'), findsOneWidget);
+      _router(tester).go(
+        '/grades?section=exams&widget=90&exam=fusion-exam&date=2026-12-07&conflict=1',
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('时间冲突'), findsOneWidget);
+      Navigator.of(tester.element(find.text('时间冲突'))).pop();
+      await tester.pumpAndSettle();
+      await exams.delete(fusionExam.id);
+      await tester.pumpAndSettle();
+      expect(find.text('时间冲突 · 融合课程'), findsNothing);
+      _router(tester).go(
+        '/grades?section=exams&widget=91&exam=fusion-exam&date=2026-12-07&conflict=1',
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('暂无考试安排'), findsOneWidget);
+      await exams.save(fusionExam);
+      await scope
+          .read(settingsProvider.notifier)
+          .setShowExamsInTimetable(false);
+      await tester.pumpAndSettle();
+      expect(find.text('时间冲突 · 融合课程'), findsOneWidget);
+      await _tab(tester, '课表');
+      expect(tester.widget<WeekTimetable>(week).week, 2);
+      expect(course, findsOneWidget);
+      expect(exam, findsNothing);
+    },
+    initialTimetable: Timetable([fusionTerm], [fusionCourse]),
+    initialExams: [fusionExam],
+    timetableClock: () => fusionDate.subtract(const Duration(days: 7)),
+  );
+
+  var examClock = fusionExam.campusEnd.subtract(const Duration(seconds: 1));
+  _appTest(
+    '考试在结束时自动切换历史配色，教学周之外通过对应日期查看',
+    (tester) async {
+      final exam = find.byKey(
+        ValueKey('timetable-exam-fusion-exam-$fusionDate'),
+      );
+      final before = tester.widget<Material>(exam).color;
+      examClock = fusionExam.campusEnd;
+      await tester.pump(const Duration(seconds: 1));
+      await tester.pumpAndSettle();
+      expect(tester.widget<Material>(exam).color, isNot(before));
+      final outside = find.text('教学周外单独考试');
+      await tester.scrollUntilVisible(
+        outside,
+        350,
+        scrollable: find.byType(Scrollable).first,
+      );
+      await tester.tap(outside);
+      await tester.pumpAndSettle();
+      expect(find.text('当日日程'), findsOneWidget);
+      expect(find.textContaining('12月28日'), findsWidgets);
+    },
+    initialTimetable: Timetable([fusionTerm], [fusionCourse]),
+    initialExams: [
+      fusionExam,
+      Exam(
+        id: 'outside',
+        name: '教学周外单独考试',
+        at: campusInstant(fusionDate, 21 * 1440 + 720),
+        endsAt: campusInstant(fusionDate, 21 * 1440 + 780),
+      ),
+    ],
+    timetableClock: () => examClock,
+  );
+
   final sunday = DateTime.utc(2026, 11, 29, 23, 59, 58);
   final datedTimetable = Timetable([
     Semester(id: 'dated', name: '跨日测试学期', start: mondayOf(sunday), weeks: 18),
@@ -2385,6 +2517,11 @@ class _RememberingTestAuth extends _TestAuth {
 class _TestSettings extends SettingsController {
   @override
   Future<AppSettings> build() async => const AppSettings();
+
+  @override
+  Future<void> setShowExamsInTimetable(bool value) async {
+    state = AsyncData(AppSettings(showExamsInTimetable: value));
+  }
 
   @override
   Future<void> setTheme(ThemeMode value) async =>

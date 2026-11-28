@@ -155,7 +155,8 @@ internal object WidgetUpdateManager {
         }
         schedule(context, data.nextUpdate(
             includeToday = all.getValue(WidgetKind.TODAY).isNotEmpty(),
-            includeExams = all.getValue(WidgetKind.EXAMS).isNotEmpty()
+            includeExams = all.getValue(WidgetKind.EXAMS).isNotEmpty(),
+            includeWeek = all.getValue(WidgetKind.WEEK).isNotEmpty()
         ))
     }
 

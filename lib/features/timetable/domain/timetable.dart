@@ -107,6 +107,20 @@ class Course {
   final int colorIndex;
 
   Map<String, dynamic> toJson() => _$CourseToJson(this);
+  Course withColor(int color) => color == colorIndex
+      ? this
+      : Course(
+          id: id,
+          semesterId: semesterId,
+          name: name,
+          teacher: teacher,
+          room: room,
+          weekday: weekday,
+          startMinute: startMinute,
+          endMinute: endMinute,
+          weeks: weeks,
+          colorIndex: color,
+        );
   String get time => '${clockLabel(startMinute)}–${clockLabel(endMinute)}';
 
   bool occurs(Semester semester, int week, int day) =>

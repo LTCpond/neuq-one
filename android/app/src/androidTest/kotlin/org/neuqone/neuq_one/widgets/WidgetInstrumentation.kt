@@ -40,6 +40,7 @@ class WidgetInstrumentation : Instrumentation() {
             timetableAndClock()
             legacyCardCleanup()
             todayCourseBoundaries()
+            fusedSchedule()
             instanceOptions()
             providerRegistration()
             rendererPreviews()
@@ -133,6 +134,66 @@ class WidgetInstrumentation : Instrumentation() {
         check(WidgetData(null, now).todayCourses.isEmpty())
     }
 
+    private fun fusedSchedule() = withTempStore { directory ->
+        val store = WidgetSnapshotStore(directory)
+        val lease = store.confirm("e".repeat(64))
+        val start = "2026-11-30T00:00:00Z"
+        val end = "2026-11-30T01:40:00Z"
+        val merged = exam("same-day", "考试样例", "考场 A", start, end)
+            .put("conflicts", 1)
+            .put("covered", JSONObject().put("2026-11-30", JSONArray(listOf("a"))))
+        val colors = JSONArray(listOf(0xfffbe2df, 0xffa52d28, 0xff783934, 0xffffdad4))
+        val finished = JSONArray(listOf(0xfff2e9e7, 0xff78605c, 0xff493c3b, 0xffe1c8c4))
+        val examSection = JSONObject().put("items", JSONArray(listOf(merged)))
+            .put("showOnTimetable", true).put("colors", colors).put("finishedColors", finished)
+        val table = JSONObject(timetable.toString())
+        table.getJSONArray("terms").getJSONObject(0).put("examDays",
+            JSONObject().put("2026-11-30", JSONObject()
+                .put("items", JSONArray(listOf(JSONObject(merged.toString())
+                    .put("from", 480).put("to", 580).put("gridFrom", 0).put("gridTo", 2)
+                    .put("examCount", 1).put("examEnd", Instant.parse(end).toEpochMilli()))))
+                .put("supplement", true)))
+        check(runCatching {
+            store.updateAll(lease, mapOf("timetable" to table.toString(), "exams" to "{}"))
+        }.isFailure)
+        check(!store.snapshot()!!.has("timetable"))
+        check(store.updateAll(lease, mapOf("timetable" to table.toString(), "exams" to examSection.toString())))
+        val during = WidgetData(store.snapshot(), Instant.parse(start))
+        check(during.todayCourses.map { it.getString("id") } == listOf("same-day", "b", "c", "d"))
+        check(during.weekExamDay(during.today)?.optBoolean("supplement") == true)
+        check(during.hasExam("same-day"))
+        check(during.nextUpdate(includeToday = true, includeExams = false) == Instant.parse(end).toEpochMilli())
+        val examOnly = WidgetData(JSONObject().put("exams", examSection), Instant.parse(start))
+        check(!examOnly.timetableReady && examOnly.todayCourses.size == 1 && !examOnly.todayCoursesEnded)
+        check(WidgetData(JSONObject().put("exams", examSection), Instant.parse(end)).todayCoursesEnded)
+        check(store.update(lease, "exams", examSection.put("showOnTimetable", false).toString()))
+        val disabled = WidgetData(store.snapshot(), Instant.parse(start))
+        check(disabled.todayCourses.first().getString("id") == "a")
+        check(disabled.weekExamDay(disabled.today) == null && disabled.exams.size == 1)
+
+        val context = targetContext
+        for (size in listOf(WidgetSize(150, 152), WidgetSize(304, 152))) {
+            val views = WidgetRenderer(context).render(WidgetKind.TODAY, 0, size, during, null, null, preview = true)
+            runOnMainSync {
+                val view = views.apply(context, FrameLayout(context))
+                check(view.findViewById<TextView>(R.id.widget_course_badge).text == "⚠ 考试")
+                val image = WidgetPreview.draw(context, views, size)
+                check(image.width > 0 && image.height > 0)
+                image.recycle()
+            }
+        }
+        for (size in listOf(WidgetSize(304, 380), WidgetSize(304, 456))) {
+            val views = WidgetRenderer(context).render(WidgetKind.WEEK, 0, size, during, null, null, preview = true)
+            runOnMainSync {
+                val view = views.apply(context, FrameLayout(context))
+                check(view.findViewById<TextView>(R.id.widget_day_name).text == "周一·")
+                val image = WidgetPreview.draw(context, views, size)
+                check(image.width > 0 && image.height > 0)
+                image.recycle()
+            }
+        }
+    }
+
     private fun instanceOptions() {
         val two = WidgetSize(150, 152)
         val four = WidgetSize(304, 152)
@@ -213,7 +274,7 @@ class WidgetInstrumentation : Instrumentation() {
                     runCatching {
                         val expected = when {
                             label.startsWith("today-free") -> "今日无课" to "好好享受今天"
-                            label.startsWith("today-done") -> "今日课程已结束" to "今天辛苦了"
+                            label.startsWith("today-done") -> "今日日程已结束" to "今天辛苦了"
                             else -> null
                         }
                         if (expected != null) {

@@ -78,13 +78,39 @@ final routerProvider = Provider<GoRouter>((ref) {
                   path: tab.path,
                   builder: (context, state) {
                     final request = state.uri.queryParameters['widget'];
+                    final dateText = state.uri.queryParameters['date'];
+                    final date = dateText == null
+                        ? null
+                        : DateTime.tryParse(dateText);
                     if (tab.path == _gradesPath &&
                         state.uri.queryParameters['section'] == 'exams') {
+                      final exam = state.uri.queryParameters['exam'];
                       return AcademicPage(
                         examRequest: request ?? '',
+                        examTarget:
+                            request != null &&
+                                exam != null &&
+                                exam.isNotEmpty &&
+                                exam.length <= 512
+                            ? (
+                                id: exam,
+                                request: request,
+                                date: date,
+                                conflictOnly:
+                                    state.uri.queryParameters['conflict'] ==
+                                    '1',
+                              )
+                            : null,
                         addExam:
                             request != null &&
                             state.uri.queryParameters['add'] == '1',
+                      );
+                    }
+                    if (tab.path == _timetablePath &&
+                        date != null &&
+                        request != null) {
+                      return TimetablePage(
+                        widgetDate: (date: date, request: request),
                       );
                     }
                     final course = state.uri.queryParameters['course'];

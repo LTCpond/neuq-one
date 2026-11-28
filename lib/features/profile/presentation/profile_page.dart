@@ -194,6 +194,40 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
                         onTap: () =>
                             _openSettings(const ReminderSettingsPage()),
                       ),
+                      const SizedBox(height: 6),
+                      Card(
+                        child: Column(
+                          children: [
+                            SwitchListTile(
+                              title: const Text('在课表中显示考试'),
+                              subtitle: const Text('在对应日期展示手动添加的考试安排。'),
+                              value: value.showExamsInTimetable,
+                              onChanged: _busy
+                                  ? null
+                                  : (enabled) => _run(() async {
+                                      await controller.setShowExamsInTimetable(
+                                        enabled,
+                                      );
+                                      return null;
+                                    }),
+                            ),
+                            const Divider(height: 1),
+                            SwitchListTile(
+                              title: const Text('考试冲突提醒'),
+                              subtitle: const Text('发现新的考试时间冲突时发送通知。'),
+                              value: value.examConflictReminders,
+                              onChanged: _busy
+                                  ? null
+                                  : (enabled) => _run(() async {
+                                      await controller.setExamConflictReminders(
+                                        enabled,
+                                      );
+                                      return null;
+                                    }),
+                            ),
+                          ],
+                        ),
+                      ),
                       if (supportsDesktopWidgets) ...[
                         const SizedBox(height: 6),
                         _ProfileTile(

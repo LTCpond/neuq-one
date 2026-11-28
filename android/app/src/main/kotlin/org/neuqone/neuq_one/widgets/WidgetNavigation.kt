@@ -9,16 +9,21 @@ import android.net.Uri
 import android.os.Build
 import org.neuqone.neuq_one.MainActivity
 import java.security.MessageDigest
+import java.time.LocalDate
 import java.util.UUID
 
 internal object WidgetNavigation {
     const val COURSE_ID = "neuqWidgetCourse"
+    const val EXAM_ID = "neuqWidgetExam"
     const val COURSE = "course"
+    const val EXAM = "exam"
+    const val DAY = "day"
+    const val SCHEDULE_ITEM = "schedule-item"
     const val TIMETABLE = "timetable"
     const val EXAMS = "exams"
     const val ADD_EXAM = "add-exam"
     private const val OPEN = "org.neuqone.neuq_one.widget.OPEN"
-    private val targets = setOf(COURSE, TIMETABLE, EXAMS, ADD_EXAM)
+    private val targets = setOf(COURSE, TIMETABLE, EXAMS, ADD_EXAM, EXAM, DAY, SCHEDULE_ITEM)
 
     private fun installToken(context: Context): String {
         val prefs = context.getSharedPreferences("desktop-widget-links", Context.MODE_PRIVATE)
@@ -29,15 +34,16 @@ internal object WidgetNavigation {
 
     fun open(
         context: Context, id: Int, link: String?, target: String,
-        course: String? = null, collection: Boolean = false
+        record: String? = null, collection: Boolean = false
     ): PendingIntent {
         val token = link ?: installToken(context)
         val uri = Uri.Builder().scheme("neuq-widget").authority("open")
             .appendPath(id.toString()).appendPath(token).appendPath(target)
-        if (course != null) uri.appendPath(courseKey(course))
+        if (record != null) uri.appendPath(if (target == DAY) record else courseKey(record))
         val intent = Intent(OPEN, uri.build(), context, MainActivity::class.java)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
-        if (course != null) intent.putExtra(COURSE_ID, course)
+        if (record != null && target == COURSE) intent.putExtra(COURSE_ID, record)
+        if (record != null && target == EXAM) intent.putExtra(EXAM_ID, record)
         val mutability = if (collection) {
             if (Build.VERSION.SDK_INT >= 31) PendingIntent.FLAG_MUTABLE else 0
         } else PendingIntent.FLAG_IMMUTABLE
@@ -57,17 +63,34 @@ internal object WidgetNavigation {
         if (target !in targets) return null
         val kind = WidgetUpdateManager.kind(context, id) ?: return null
         if (target !in when (kind) {
-            WidgetKind.TODAY, WidgetKind.WEEK -> setOf(TIMETABLE, COURSE)
-            WidgetKind.EXAMS -> setOf(EXAMS, ADD_EXAM)
+            WidgetKind.TODAY -> setOf(TIMETABLE, COURSE, EXAM, SCHEDULE_ITEM)
+            WidgetKind.WEEK -> setOf(TIMETABLE, COURSE, DAY, EXAMS)
+            WidgetKind.EXAMS -> setOf(EXAMS, ADD_EXAM, EXAM, SCHEDULE_ITEM)
         }) return null
-        if (target != COURSE) return Link(target, null, if (authenticated) token else null)
+        if (target in setOf(TIMETABLE, EXAMS, ADD_EXAM)) {
+            return Link(target, null, if (authenticated) token else null)
+        }
         if (!authenticated) return null
+        if (target == DAY) {
+            val day = runCatching { LocalDate.parse(parts.getOrNull(3)) }.getOrNull() ?: return null
+            if (day.year !in 2000..2100) return null
+            return Link(DAY, null, token, date = day.toString())
+        }
+        val exam = intent.getStringExtra(EXAM_ID)
+        if (target == EXAM || target == SCHEDULE_ITEM && exam != null) {
+            if (exam == null || exam.length !in 1..512) return null
+            if (parts.size == 4 && parts[3] != courseKey(exam)) return null
+            val data = WidgetData(store.snapshot())
+            return if (data.hasExam(exam)) Link(EXAM, null, token, exam = exam)
+            else Link(EXAMS, null, token)
+        }
+        if (kind == WidgetKind.EXAMS) return null
         val course = intent.getStringExtra(COURSE_ID) ?: return null
         if (course.length !in 1..512) return null
         if (parts.size == 4 && parts[3] != courseKey(course)) return null
         // On cold start the verified snapshot is still available until beginVerification.
         if (!WidgetData(store.snapshot()).hasCourse(course)) return null
-        return Link(target, course, token)
+        return Link(COURSE, course, token)
     }
 
     private fun courseKey(course: String): String =
@@ -80,7 +103,10 @@ internal object WidgetNavigation {
         return PendingIntent.getBroadcast(context, 0, intent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
     }
 
-    data class Link(val target: String, val course: String?, val ownerLink: String?) {
-        fun arguments() = mapOf("target" to target, "course" to course)
+    data class Link(
+        val target: String, val course: String?, val ownerLink: String?,
+        val exam: String? = null, val date: String? = null
+    ) {
+        fun arguments() = mapOf("target" to target, "course" to course, "exam" to exam, "date" to date)
     }
 }

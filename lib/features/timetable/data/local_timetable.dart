@@ -1,6 +1,7 @@
 import 'package:drift/drift.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/auth/school_auth.dart';
 import '../../../core/database/app_database.dart';
 import '../../../core/database/school_data.dart';
 import '../../../core/time/campus_clock.dart';
@@ -9,15 +10,36 @@ import '../domain/timetable.dart';
 final timetableRepositoryProvider = Provider<TimetableRepository>(
   (ref) => LocalTimetableRepository(ref.watch(databaseProvider)),
 );
-final timetableProvider = StreamProvider<Timetable>(
-  (ref) => ref.watch(timetableRepositoryProvider).watch(),
-);
+final timetableStreamProvider = StreamProvider.autoDispose
+    .family<Timetable, String>((ref, subject) {
+      if (ref.watch(
+            schoolSessionProvider.select(
+              (state) => state.asData?.value?.subject,
+            ),
+          ) !=
+          subject) {
+        return const Stream.empty();
+      }
+      return ref.watch(timetableRepositoryProvider).watch();
+    });
+
+final timetableProvider = Provider.autoDispose<AsyncValue<Timetable>>((ref) {
+  final subject = ref.watch(
+    schoolSessionProvider.select((state) => state.asData?.value?.subject),
+  );
+  return subject == null
+      ? const AsyncLoading()
+      : ref.watch(timetableStreamProvider(subject));
+});
 
 final visibleTimetableProvider = Provider<AsyncValue<Timetable>>((ref) {
   final local = ref.watch(timetableProvider);
-  final school = ref.watch(schoolTimetableCacheProvider).value?.data;
+  final school = ref.watch(
+    schoolTimetableCacheProvider.select((value) => value.value?.data),
+  );
   if (school == null) return local;
-  return local.whenData((data) => mergeTimetable(data, school));
+  final data = local.value;
+  return AsyncData(data == null ? school : mergeTimetable(data, school));
 });
 
 Timetable mergeTimetable(Timetable local, Timetable? school) => school == null

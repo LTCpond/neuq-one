@@ -77,13 +77,17 @@ internal class WidgetSnapshotStore(directory: File) {
         file.delete()
     }
 
-    fun update(lease: String, key: String, raw: String): Boolean {
+    fun update(lease: String, key: String, raw: String): Boolean =
+        updateAll(lease, mapOf(key to raw))
+
+    fun updateAll(lease: String, sections: Map<String, String>): Boolean {
         if (!state.optBoolean("verified") || state.optString("lease") != lease) return false
-        require(raw.length <= MAX_BYTES)
-        val section = JSONObject(raw)
-        validate(key, section)
-        if (state.optJSONObject(key)?.toString() == section.toString()) return false
-        save(copy().put(key, section))
+        val changed = sections.mapValues { (key, raw) ->
+            require(raw.length <= MAX_BYTES)
+            JSONObject(raw).also { validate(key, it) }
+        }.filter { (key, section) -> state.optJSONObject(key)?.toString() != section.toString() }
+        if (changed.isEmpty()) return false
+        save(copy().apply { changed.forEach { (key, section) -> put(key, section) } })
         return true
     }
 
@@ -136,20 +140,44 @@ internal class WidgetSnapshotStore(directory: File) {
                         val schedule = course.getJSONArray("weeks")
                         require(schedule.length() in 1..weeks)
                         for (i in 0 until schedule.length()) require(schedule.getInt(i) in 1..weeks)
-                        val colors = course.getJSONArray("colors")
-                        require(colors.length() == 4)
-                        for (i in 0..3) require(colors.getLong(i) in 0xff000000L..0xffffffffL)
+                        course.getJSONArray("colors").validateColors()
+                    }
+                    term.optJSONObject("examDays")?.let { days ->
+                        require(days.length() <= weeks * 7)
+                        val start = LocalDate.parse(term.getString("start"))
+                        val monday = start.minusDays(start.dayOfWeek.value - 1L)
+                        days.keys().forEach { key ->
+                            val date = LocalDate.parse(key)
+                            require(date >= monday && date < monday.plusWeeks(weeks.toLong()))
+                            days.getJSONObject(key).getJSONArray("items").objects().forEach { item ->
+                                item.validateRecord()
+                                val from = item.getDouble("gridFrom")
+                                val to = item.getDouble("gridTo")
+                                require(from >= 0 && to <= 12 && from < to)
+                                require(item.getInt("from") in 0..1439 && item.getInt("to") in item.getInt("from")..1440)
+                                if (item.optInt("examCount") == 0) item.getJSONArray("colors").validateColors()
+                            }
+                        }
                     }
                 }
             }
-            "exams" -> data.getJSONArray("items").objects().forEach {
-                it.validateRecord()
-                require(it.getLong("end") > it.getLong("start"))
-                require(campusDay(Instant.ofEpochMilli(it.getLong("start"))).year in 1900..2200)
-                require(campusDay(Instant.ofEpochMilli(it.getLong("end"))).year in 1900..2200)
+            "exams" -> {
+                data.optJSONArray("colors")?.validateColors()
+                data.optJSONArray("finishedColors")?.validateColors()
+                data.getJSONArray("items").objects().forEach {
+                    it.validateRecord()
+                    require(it.getLong("end") > it.getLong("start"))
+                    require(campusDay(Instant.ofEpochMilli(it.getLong("start"))).year in 1900..2200)
+                    require(campusDay(Instant.ofEpochMilli(it.getLong("end"))).year in 1900..2200)
+                }
             }
             else -> error("Unknown widget section")
         }
+    }
+
+    private fun JSONArray.validateColors() {
+        require(length() == 4)
+        for (i in 0..3) require(getLong(i) in 0xff000000L..0xffffffffL)
     }
 
     private fun JSONObject.validateRecord() {
@@ -174,12 +202,23 @@ internal class WidgetData(snapshot: JSONObject?, val now: Instant = Instant.now(
     val timetable = snapshot?.optJSONObject("timetable")
     val terms = timetable?.getJSONArray("terms")?.objects().orEmpty()
     val term = terms.firstOrNull { !today.isBefore(it.start()) } ?: terms.firstOrNull()
-    val exams = snapshot?.optJSONObject("exams")?.getJSONArray("items")?.objects().orEmpty()
+    val timetableReady = timetable?.optBoolean("ready", term != null) ?: false
+    private val examSection = snapshot?.optJSONObject("exams")
+    val showExams = examSection?.optBoolean("showOnTimetable") == true && examSection.has("colors")
+    private val allExams = examSection?.getJSONArray("items")?.objects().orEmpty()
+    val exams = allExams
         .filter { it.getLong("end") > now.toEpochMilli() }
         .sortedBy { it.getLong("start") }
-    val todayCourses = currentWeek()?.let { courses(it, today.dayOfWeek.value) }.orEmpty()
-    private val lastCourseEnd = todayCourses.maxOfOrNull { it.getInt("to") }?.let {
-        today.atStartOfDay().plusMinutes(it.toLong()).toInstant(campusZone)
+    private val dayStart = today.atStartOfDay().toInstant(campusZone)
+    private val dayEnd = today.plusDays(1).atStartOfDay().toInstant(campusZone)
+    private val todayExams = if (!showExams) emptyList() else allExams.filter {
+        it.getLong("start") < dayEnd.toEpochMilli() && it.getLong("end") > dayStart.toEpochMilli()
+    }
+    val hasExamToday = todayExams.isNotEmpty()
+    val todayCourses = todaySchedule()
+    private val lastCourseEnd = todayCourses.maxOfOrNull {
+        if (it.optInt("examCount") > 0) minOf(Instant.ofEpochMilli(it.getLong("end")), dayEnd)
+        else dayStart.plusSeconds(it.getInt("to") * 60L)
     }
     val todayCoursesEnded = lastCourseEnd?.let { now >= it } ?: false
 
@@ -203,14 +242,48 @@ internal class WidgetData(snapshot: JSONObject?, val now: Instant = Instant.now(
         }.sortedBy { it.getInt("from") }
     }
 
+    private fun todaySchedule(): List<JSONObject> {
+        val courses = currentWeek()?.let { courses(it, today.dayOfWeek.value) }.orEmpty()
+        if (todayExams.isEmpty()) return courses
+        val covered = todayExams.flatMap { exam ->
+            val ids = exam.optJSONObject("covered")?.optJSONArray(today.toString())
+            if (ids == null) emptyList() else List(ids.length(), ids::getString)
+        }.toSet()
+        val exams = todayExams.map { exam ->
+            val start = maxOf(Instant.ofEpochMilli(exam.getLong("start")), dayStart)
+            val end = minOf(Instant.ofEpochMilli(exam.getLong("end")), dayEnd)
+            JSONObject(exam.toString()).apply {
+                put("examCount", 1)
+                put("from", ChronoUnit.MINUTES.between(dayStart, start))
+                put("to", (ChronoUnit.MILLIS.between(dayStart, end) + 59_999) / 60_000)
+                put("colors", examColors(now >= Instant.ofEpochMilli(exam.getLong("end"))))
+            }
+        }
+        return (courses.filterNot { it.getString("id") in covered } + exams).sortedWith(
+            compareBy<JSONObject> { entry ->
+                if (entry.optInt("examCount") > 0) entry.getLong("start")
+                else dayStart.plusSeconds(entry.getInt("from") * 60L).toEpochMilli()
+            }.thenByDescending { it.optInt("examCount") }
+        )
+    }
+
+    fun examColors(finished: Boolean): JSONArray? =
+        examSection?.optJSONArray(if (finished) "finishedColors" else "colors")
+            ?: examSection?.optJSONArray("colors")
+
+    fun weekExamDay(date: LocalDate): JSONObject? =
+        if (showExams) term?.optJSONObject("examDays")?.optJSONObject(date.toString()) else null
+
+    fun hasExam(id: String) = allExams.any { it.getString("id") == id }
+
     fun hasCourse(id: String) = terms.any { term ->
         term.getJSONArray("courses").objects().any { it.getString("id") == id }
     }
 
-    fun nextUpdate(includeToday: Boolean, includeExams: Boolean): Long {
+    fun nextUpdate(includeToday: Boolean, includeExams: Boolean, includeWeek: Boolean = false): Long {
         val midnight = today.plusDays(1).atStartOfDay().toInstant(campusZone).toEpochMilli()
         val courseEnd = lastCourseEnd?.takeIf { includeToday && !todayCoursesEnded }?.toEpochMilli()
-        val examBoundary = if (includeExams) exams.asSequence()
+        val examBoundary = if (includeExams || showExams && (includeToday || includeWeek)) exams.asSequence()
             .flatMap { sequenceOf(it.getLong("start"), it.getLong("end")) }
             .filter { it > now.toEpochMilli() }.minOrNull() else null
         return listOfNotNull(midnight, courseEnd, examBoundary).min()

@@ -1,16 +1,36 @@
 import 'package:drift/drift.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/auth/school_auth.dart';
 import '../../../core/database/app_database.dart';
-import '../../../core/time/campus_clock.dart';
 import '../domain/exam.dart';
+
+export '../../../core/time/campus_clock.dart' show campusInstant;
 
 final examRepositoryProvider = Provider<ExamRepository>(
   (ref) => LocalExamRepository(ref.watch(databaseProvider)),
 );
-final examsProvider = StreamProvider<List<Exam>>(
-  (ref) => ref.watch(examRepositoryProvider).watch(),
-);
+final examStreamProvider = StreamProvider.autoDispose
+    .family<List<Exam>, String>((ref, subject) {
+      if (ref.watch(
+            schoolSessionProvider.select(
+              (state) => state.asData?.value?.subject,
+            ),
+          ) !=
+          subject) {
+        return const Stream.empty();
+      }
+      return ref.watch(examRepositoryProvider).watch();
+    });
+
+final examsProvider = Provider.autoDispose<AsyncValue<List<Exam>>>((ref) {
+  final subject = ref.watch(
+    schoolSessionProvider.select((state) => state.asData?.value?.subject),
+  );
+  return subject == null
+      ? const AsyncLoading()
+      : ref.watch(examStreamProvider(subject));
+});
 
 class LocalExamRepository implements ExamRepository {
   LocalExamRepository(this.db);
@@ -61,7 +81,3 @@ class LocalExamRepository implements ExamRepository {
   Future<void> delete(String id) =>
       (db.delete(db.examRows)..where((row) => row.id.equals(id))).go();
 }
-
-/// Builds a UTC instant from a campus calendar date and the minute of day.
-DateTime campusInstant(DateTime date, int minute) =>
-    calendarDate(date).add(Duration(minutes: minute)).subtract(campusOffset);

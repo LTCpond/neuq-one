@@ -33,13 +33,19 @@ final reminderSyncProvider = FutureProvider<ReminderStatus>((ref) async {
   final schoolCache = timetable == null
       ? null
       : ref.watch(schoolTimetableCacheProvider);
+  final local = timetable == null ? null : ref.watch(timetableProvider);
   final waitingForSchoolCache =
-      (schoolCache?.isLoading ?? false) || (schoolCache?.hasError ?? false);
+      (schoolCache?.isLoading ?? false) ||
+      (schoolCache?.hasError ?? false) ||
+      (local?.isLoading ?? false) ||
+      (local?.hasError ?? false);
   return service.sync(
     subject: subject,
     timetable: waitingForSchoolCache ? null : timetable?.asData?.value,
     timetableFailed:
-        (schoolCache?.hasError ?? false) || (timetable?.hasError ?? false),
+        (schoolCache?.hasError ?? false) ||
+        (timetable?.hasError ?? false) ||
+        (local?.hasError ?? false),
     lead: lead,
     allowInexact: settings.allowInexactReminders,
   );
@@ -100,6 +106,9 @@ class CourseReminderService {
   static const _titlePrefix = '即将上课 · ';
   static const _payloadPrefix = 'neuq-course-v1/';
   static const _channelId = 'courses';
+  static const _examChannelId = 'exam-conflicts';
+  static const _examConflictId = 998;
+  static const examConflictPayloadPrefix = 'neuq-exam-conflict-v1/';
   static const _settingsChannel = MethodChannel(
     'org.neuqone.neuq_one/notification_settings',
   );
@@ -117,6 +126,9 @@ class CourseReminderService {
   final FlutterLocalNotificationsPlugin _plugin;
   final DateTime Function() _clock;
   Future<void>? _initialization;
+  Future<void>? _launchCheck;
+  String? _pendingExamTap;
+  VoidCallback? onExamConflictTap;
   Future<void> _queue = Future.value();
   int _revision = 0;
 
@@ -157,6 +169,14 @@ class CourseReminderService {
           requestSoundPermission: false,
         ),
       ),
+      onDidReceiveNotificationResponse: (response) {
+        final payload = response.payload;
+        if (payload == null || !payload.startsWith(examConflictPayloadPrefix)) {
+          return;
+        }
+        _pendingExamTap = payload;
+        onExamConflictTap?.call();
+      },
     );
     // On iOS the plugin returns false when setup requests no authorizations.
     if (ready == null || (isAndroid && !ready)) {
@@ -169,7 +189,9 @@ class CourseReminderService {
     );
   }
 
-  Future<bool> notificationsAllowed() async {
+  Future<bool> notificationsAllowed() => _notificationsAllowed(_channelId);
+
+  Future<bool> _notificationsAllowed(String channelId) async {
     if (!supported) return false;
     await _initialize();
     if (isAndroid) {
@@ -177,7 +199,7 @@ class CourseReminderService {
       final channels = await _android?.getNotificationChannels();
       return !(channels?.any(
             (channel) =>
-                channel.id == _channelId &&
+                channel.id == channelId &&
                 channel.importance == Importance.none,
           ) ??
           false);
@@ -185,6 +207,64 @@ class CourseReminderService {
     final permission = await _ios?.checkPermissions();
     return permission?.isEnabled == true ||
         permission?.isProvisionalEnabled == true;
+  }
+
+  Future<void> _checkNotificationLaunch() async {
+    await _initialize();
+    final launch = await _plugin.getNotificationAppLaunchDetails();
+    final payload = launch?.notificationResponse?.payload;
+    if (launch?.didNotificationLaunchApp == true &&
+        payload != null &&
+        payload.startsWith(examConflictPayloadPrefix)) {
+      _pendingExamTap ??= payload;
+    }
+  }
+
+  Future<String?> takeExamConflictTap() async {
+    if (!supported) return null;
+    await (_launchCheck ??= _checkNotificationLaunch().onError<Object>((
+      error,
+      stack,
+    ) {
+      _launchCheck = null;
+      Error.throwWithStackTrace(error, stack);
+    }));
+    final payload = _pendingExamTap;
+    _pendingExamTap = null;
+    return payload;
+  }
+
+  Future<bool> showExamConflict({
+    required String body,
+    required String payload,
+    required bool Function() isCurrent,
+  }) async {
+    if (!await _notificationsAllowed(_examChannelId) || !isCurrent()) {
+      return false;
+    }
+    await _plugin.show(
+      id: _examConflictId,
+      title: '考试时间冲突提醒',
+      body: body,
+      payload: payload,
+      notificationDetails: const NotificationDetails(
+        android: AndroidNotificationDetails(
+          _examChannelId,
+          '考试冲突提醒',
+          channelDescription: '教务课表更新后发现的新考试时间冲突',
+          icon: 'ic_stat_course',
+          visibility: NotificationVisibility.private,
+        ),
+        iOS: DarwinNotificationDetails(),
+      ),
+    );
+    return true;
+  }
+
+  Future<void> dismissExamConflict() async {
+    if (!supported) return;
+    await _initialize();
+    await _plugin.cancel(id: _examConflictId);
   }
 
   Future<bool> requestPermission() async {

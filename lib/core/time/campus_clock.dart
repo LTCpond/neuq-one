@@ -5,6 +5,15 @@ DateTime campusNow() => DateTime.now().toUtc().add(campusOffset);
 DateTime campusDateAt(DateTime instant) =>
     calendarDate(instant.toUtc().add(campusOffset));
 
+/// Converts a campus calendar date and wall-clock minute to a UTC instant.
+DateTime campusInstant(DateTime date, int minute) =>
+    calendarDate(date).add(Duration(minutes: minute)).subtract(campusOffset);
+
+int campusMinuteAt(DateTime instant) {
+  final time = instant.toUtc().add(campusOffset);
+  return time.hour * 60 + time.minute;
+}
+
 DateTime calendarDate(DateTime value) =>
     DateTime.utc(value.year, value.month, value.day);
 

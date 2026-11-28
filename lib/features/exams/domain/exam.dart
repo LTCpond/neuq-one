@@ -21,11 +21,12 @@ class Exam {
   DateTime get campusEnd => endsAt.toUtc().add(campusOffset);
   DateTime get campusDate => calendarDate(campusStart);
 
-  bool isFinishedAt(DateTime now) => campusEnd.isBefore(now);
+  bool isFinishedAt(DateTime now) => !now.isBefore(campusEnd);
 
   String get campusTimeRange =>
       '${clockLabel(campusStart.hour * 60 + campusStart.minute)}'
-      '–${clockLabel(campusEnd.hour * 60 + campusEnd.minute)}';
+      '–${campusDate == calendarDate(campusEnd) ? '' : '${shortDate(campusEnd)} '}'
+      '${clockLabel(campusEnd.hour * 60 + campusEnd.minute)}';
 }
 
 abstract interface class ExamRepository {
